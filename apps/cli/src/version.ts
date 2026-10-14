@@ -5,10 +5,12 @@
  */
 import { createRequire } from "node:module";
 
-interface PackageJson { readonly version: string; readonly engines?: { readonly node?: string } }
+interface PackageJson { readonly version: string; readonly engines?: { readonly node?: string }; readonly dependencies?: Readonly<Record<string, string>> }
 
 const pkg = createRequire(import.meta.url)("../package.json") as PackageJson;
 
 export const VERSION: string = pkg.version;
 /** The supported Node.js range (package.json engines.node). */
 export const NODE_ENGINE: string = pkg.engines?.node ?? ">=24.15.0";
+/** The runtime dependencies the package declares (#8: bin.ts checks they resolve before anything runs). */
+export const RUNTIME_DEPENDENCIES: readonly string[] = Object.keys(pkg.dependencies ?? {});

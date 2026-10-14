@@ -59,6 +59,9 @@ describe("bridge contract (what the agent is told)", () => {
     expect(text).toContain("\"DUO's decision proposal tool is unavailable in this client/session\"");
     // The CLI has no propose command; the block must not invent one.
     expect(text).not.toMatch(/duoctl (?:propose|decision propose)/u);
+    // T76 (#8): a client can list tools before the server has started; check again before falling back.
+    expect(text).toContain("- If the duo_* tools are not in your tool list when the session starts, wait a few seconds and check the list again before you fall back: the duo-director server can take a few seconds to start.");
+    expect(lines.indexOf("- If the duo_* tools are not in your tool list when the session starts, wait a few seconds and check the list again before you fall back: the duo-director server can take a few seconds to start.")).toBeLessThan(lines.findIndex((l) => l.startsWith("- If the duo_* tools are not listed by name")));
     const npx = bridgeLines("npx --no-install duoctl").join("\n");
     for (const sub of ["status", "context \"<task>\"", "review"]) expect(npx).toContain(`\`npx --no-install duoctl ${sub}\``);
   });
@@ -71,6 +74,16 @@ describe("bridge contract (what the agent is told)", () => {
     expect(updated.startsWith(human)).toBe(true);
     expect(inspectBridge(updated, lines)).toBe("current");
     expect(removeBlock(updated, BRIDGE_MARKERS)).toBe(human);
+  });
+  it("an installed 0.3.2 block (without the re-check line) is outdated and updates to the current block (T76, #8)", () => {
+    const old = lines.filter((l) => !l.startsWith("- If the duo_* tools are not in your tool list"));
+    expect(old.length).toBe(lines.length - 1);
+    const human = "# Team rules\n\nUse tabs.\n";
+    const installed = upsertBlock(human, old, BRIDGE_MARKERS);
+    expect(inspectBridge(installed, lines)).toBe("outdated");
+    const updated = upsertBlock(installed, lines, BRIDGE_MARKERS);
+    expect(updated.startsWith(human)).toBe(true);
+    expect(inspectBridge(updated, lines)).toBe("current");
   });
   it("is short and has no repository context (AC-017-05)", () => {
     expect(lines.length - 2).toBeLessThanOrEqual(10);

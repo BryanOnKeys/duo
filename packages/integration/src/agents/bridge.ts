@@ -3,7 +3,8 @@
  * Code). It tells the agent when to use the DUO tools; the MCP server instructions carry only a few
  * principles. The block has no repository context and at most ten lines between the markers. MCP
  * clients expose tools differently (some nest or defer them), so the block also gives the CLI fallback
- * and what to tell the human when the proposal tool is missing (#8).
+ * and what to tell the human when the proposal tool is missing (#8). Clients can list tools before the server has
+ * started, so the block asks the agent to check the list again before it falls back (#8, T76).
  */
 import { findBlock, type Markers } from "./managed-block.js";
 import type { BridgeStatus } from "./types.js";
@@ -22,6 +23,7 @@ export function bridgeLines(duoctl: string): string[] {
     `- After meaningful code changes: run ${cmd}, then call duo_review_changes.`,
     "- If the review returns ASK, show the human its question. Never bypass BLOCK by editing Project Truth (.duo-project/).",
     "- To change a decision, call duo_propose_decision. You cannot confirm or reject decisions; a human does.",
+    "- If the duo_* tools are not in your tool list when the session starts, wait a few seconds and check the list again before you fall back: the duo-director server can take a few seconds to start.",
     `- If the duo_* tools are not listed by name, look for the tools of the duo-director MCP server (some clients nest or defer MCP tools). If they are unavailable, run ${cli("status")}, ${cli('context "<task>"')} and ${cli("review")} in a shell instead.`,
     "- If duo_propose_decision is unavailable, do not edit .duo-project/ yourself: tell the human \"DUO's decision proposal tool is unavailable in this client/session\" and ask them to request the proposal in a session where DUO's MCP tools are available.",
     BRIDGE_MARKERS.end,

@@ -24,6 +24,7 @@ Tool은 9개로 고정한다(H-10). 새 Tool이 필요하면 별도 Spec과 ADR�
 - 서버 이름: `duo-director`(`MCP_SERVER_NAME`, H-20). 버전은 duoctl 버전이다. Tool 이름의 `duo_` 접두사는 서버 이름 아래에 있으므로 유지한다.
 - SDK: 공식 MCP TypeScript SDK v2. `@modelcontextprotocol/server@2.1.0`(integration, exact), 입력·출력 스키마는 `zod@4.6.5`(workspace 전체가 같은 한 벌). 테스트는 `@modelcontextprotocol/client@2.1.0`(root devDependency). v1 monolithic `@modelcontextprotocol/sdk`는 쓰지 않는다. SDK import는 `packages/integration/src/mcp/`에서만 허용한다(`boundaries.json` `mcpSdk`, lint).
 - 연결: `serveStdio(factory)`가 opening exchange로 protocol era를 고르고 연결마다 `McpServer` 인스턴스 하나를 고정한다. 2025-era `initialize`도 같은 factory로 받는다(`legacy: "serve"`, SDK 기본).
+- 시작 시간(#8, T76): Agent client는 server가 `initialize`에 답하기 전에 tool 목록을 만들 수 있다(T75 실험: Codex 0.147.0에서 지연 1.8초 이상이면 tool 사용 0회). 그래서 `initialize`·`tools/list`에 필요 없는 library(`typescript`, `gpt-tokenizer`, MCP client, `yaml`, Markdown parser)는 처음 쓰는 곳에서 읽는다. 시작할 때는 MCP server SDK와 zod만 읽고, 첫 tool 호출이 필요한 library를 읽는다. 패키지된 duoctl 기준 측정(Windows, T76): `initialize` 응답 중앙값 단독 1.19초 → 0.49초, 8개 동시 2.17초 → 0.78초. `bin.ts`는 선언된 runtime dependency를 읽지 않고 resolve만 해서 빠진 dependency를 여전히 시작 전에 incomplete installation으로 보고한다. tool 목록·schema·결과는 바뀌지 않는다.
 - Root: 시작할 때 한 번 정한다. `--root`(없으면 cwd), 또는 `--root-from git-cwd`(작업 디렉터리를 포함한 Git work tree의 top level), `--root-from env:<NAME>`(서버 환경 변수의 절대 경로, Claude Code의 `CLAUDE_PROJECT_DIR`). 결과는 **Git work tree의 top level**이어야 한다(`openGitProvider`: 저장소가 아니면 `GIT_REPOSITORY_REQUIRED`, 하위 디렉터리면 `SCAN_ROOT_INVALID`, `--root-from`을 풀 수 없으면 `MCP_ROOT_UNRESOLVED`). 위로 올라가며 `.duo-project/`를 찾지 않는다. 서버 하나는 저장소 하나만 다룬다. 시작 실패는 stderr에 진단을 쓰고 종료 코드 1이며 stdout은 비어 있다.
 - stdout에는 JSON-RPC 메시지만 쓴다. 진단과 metric 쓰기 경고는 stderr로 보낸다. CLI renderer는 호출하지 않는다.
 - 종료: client가 stdin을 닫거나 SIGINT/SIGTERM을 받으면 연결을 닫고 종료 코드 0으로 끝난다. 호출 사이에 열린 GraphStore, statement, transaction이 없으므로 따로 정리할 handle이 없다.
@@ -149,7 +150,7 @@ inspectAgentIntegration → planAgentIntegration(쓰기 0) → IntegrationPlan �
 - `duoctl mcp --root-from git-cwd | env:<NAME>`: 이 두 형식만 받는다. 결과는 다시 Git top level로 검증한다(`MCP_ROOT_UNRESOLVED`, `SCAN_ROOT_INVALID`). `--root`와 함께 쓸 수 없다. 설정에 절대 경로가 없으므로 clone·이동 뒤에도 같은 설정이 새 위치의 저장소를 연다.
 - Launcher(`DuoLauncher { kind, command, argsPrefix }`): 기본 `path` = PATH의 `duoctl`(설치된 실행 파일), `--launcher npx` = `npx --no-install duoctl`(project에 `@duo-director/cli`가 설치되어 `node_modules/.bin/duoctl`이 있을 때만. 내려받지 않는다, C162). verify는 launcher provenance(kind, resolved, localBin, 응답한 version)를 보인다. 설정에 개발자의 소스 경로를 쓰지 않는다. 설치 시 Agent가 찾을 수 있는지 확인하고 못 찾으면 `AGENT_LAUNCHER_UNAVAILABLE`로 막는다. 상대 경로 command는 거부, 절대 경로는 API로만 가능하며 이식성 경고를 낸다. 저장소 root에 `duoctl`, `duoctl.cmd` 같은 파일이 있으면(Windows의 process 검색이 작업 디렉터리를 볼 수 있음) conflict다. Windows에서 Codex가 `duoctl.cmd` shim을 `command = "duoctl"`로 실행하는 것을 확인했다.
 - 기존 항목: not-configured(추가), already-configured(unchanged), drifted(DUO 블록이 다름: 갱신), compatible-different-format(다른 모양의 DUO launch: JSON은 확인 후 교체, TOML 블록 밖이면 사람이 지우도록 conflict), conflict(같은 이름의 다른 command, 읽을 수 없는 파일, 깨진 marker, symlink). conflict는 `--yes`로도 덮어쓰지 않는다.
-- Bridge: `<!-- duo-director:begin -->` … `<!-- duo-director:end -->` 블록. 없으면 한 줄 띄우고 추가, 있으면 블록만 갱신, marker가 깨졌으면 conflict. 블록 밖 사람 글은 바꾸지 않는다. MCP client마다 tool을 보이는 방식이 달라(이름 그대로, 중첩, 지연 노출) 마지막 두 줄이 tool을 찾는 법, CLI fallback, proposal tool이 없을 때 사람에게 알리는 법을 준다(#8, H-84). 내용(10줄 이하, 저장소 정보 없음):
+- Bridge: `<!-- duo-director:begin -->` … `<!-- duo-director:end -->` 블록. 없으면 한 줄 띄우고 추가, 있으면 블록만 갱신, marker가 깨졌으면 conflict. 블록 밖 사람 글은 바꾸지 않는다. MCP client마다 tool을 보이는 방식이 달라(이름 그대로, 중첩, 지연 노출) 마지막 세 줄이 tool 목록을 다시 확인하는 법(client가 server 시작 전에 tool 목록을 만들 수 있음, #8·T76), tool을 찾는 법, CLI fallback, proposal tool이 없을 때 사람에게 알리는 법을 준다(#8, H-84). 이 줄이 없는 0.3.2 블록은 `outdated`이고 사람이 `duoctl install <agent>`로 갱신한다(자동 갱신 없음). 내용(10줄 이하, 저장소 정보 없음):
 
 ```markdown
 <!-- duo-director:begin -->
@@ -159,6 +160,7 @@ inspectAgentIntegration → planAgentIntegration(쓰기 0) → IntegrationPlan �
 - After meaningful code changes: run `duoctl index`, then call duo_review_changes.
 - If the review returns ASK, show the human its question. Never bypass BLOCK by editing Project Truth (.duo-project/).
 - To change a decision, call duo_propose_decision. You cannot confirm or reject decisions; a human does.
+- If the duo_* tools are not in your tool list when the session starts, wait a few seconds and check the list again before you fall back: the duo-director server can take a few seconds to start.
 - If the duo_* tools are not listed by name, look for the tools of the duo-director MCP server (some clients nest or defer MCP tools). If they are unavailable, run `duoctl status`, `duoctl context "<task>"` and `duoctl review` in a shell instead.
 - If duo_propose_decision is unavailable, do not edit .duo-project/ yourself: tell the human "DUO's decision proposal tool is unavailable in this client/session" and ask them to request the proposal in a session where DUO's MCP tools are available.
 <!-- duo-director:end -->

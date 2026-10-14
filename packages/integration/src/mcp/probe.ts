@@ -5,8 +5,6 @@
  * callStatus false (duoctl doctor, T26.1) stops after tools/list: the caller already has the status, and
  * the server then runs no freshness inspection of its own.
  */
-import { Client } from "@modelcontextprotocol/client";
-import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 export interface McpLaunchProbe {
   readonly command: string;
@@ -24,6 +22,8 @@ export type McpProbeResult =
   | { readonly ok: false; readonly error: string; readonly stderr: string };
 
 export async function probeMcpLaunch(probe: McpLaunchProbe): Promise<McpProbeResult> {
+  // #8: the MCP client is loaded here (install verify, doctor), never when duoctl or its MCP server starts.
+  const [{ Client }, { getDefaultEnvironment, StdioClientTransport }] = await Promise.all([import("@modelcontextprotocol/client"), import("@modelcontextprotocol/client/stdio")]);
   let stderr = "";
   const transport = new StdioClientTransport({
     command: probe.command, args: [...probe.args], cwd: probe.cwd, stderr: "pipe",

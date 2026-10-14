@@ -6,6 +6,7 @@ import {
   assistDeterministic, blockEligible, createNoopLLMProvider, invokeLLM, llmProviderState, llmUsageRecord,
   LLM_CACHE_DIR, type LLMProvider, type LLMRequest, type LLMResponse,
 } from "./index.js";
+import { countTokens } from "../tokens/tokenizer.js";
 
 const TEXT: LLMRequest = { purpose: "review-semantic-check", instructions: "Answer briefly.", input: "Packet text", output: { mode: "text" } };
 const STRUCTURED: LLMRequest = {
@@ -32,6 +33,9 @@ afterEach(() => vi.restoreAllMocks());
 describe("LLMProvider contract and the no-op provider (TASK-012A)", () => {
   it("AC-012A-01: the no-op provider is disabled, answers not-configured, and does no I/O at all", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
+    // #8: the tokenizer loads on first use, and Node's module loader reads NODE_V8_COVERAGE when it does. Load it first:
+    // this test is about the provider, which must read no environment variable.
+    countTokens("warm up");
     const env = process.env;
     const reads: string[] = [];
     process.env = new Proxy(env, { get: (t, k) => { reads.push(String(k)); return Reflect.get(t, k); } });

@@ -2,8 +2,17 @@
  * YAML source parsing. Only this layer knows the "yaml" library; callers receive plain data
  * plus a locator, never YAML AST types.
  */
-import { isMap, isNode, isScalar, LineCounter, parseDocument, stringify, visit, type Node as YamlNode } from "yaml";
+import { createRequire } from "node:module";
+import type { Node as YamlNode } from "yaml";
 import { createDiagnostic, failure, success, type Diagnostic, type ParseResult, type SourceLocation } from "../diagnostics.js";
+
+type YamlLibrary = typeof import("yaml");
+const load = createRequire(import.meta.url);
+let library: YamlLibrary | undefined;
+/** #8: the yaml library is read on the first parse or stringify, never when the CLI or the MCP server starts. */
+function yaml(): YamlLibrary {
+  return (library ??= load("yaml") as YamlLibrary);
+}
 
 export interface YamlInput {
   /** Repository-relative POSIX path used in diagnostics. */
@@ -28,7 +37,7 @@ function firstLine(message: string): string {
 
 /** Plain data as YAML text for a new Project Truth file (DecisionService, T09): no anchors, no line folding. */
 export function stringifyYaml(data: unknown): string {
-  return stringify(data, { aliasDuplicateObjects: false, lineWidth: 0 });
+  return yaml().stringify(data, { aliasDuplicateObjects: false, lineWidth: 0 });
 }
 
 /**
@@ -36,7 +45,7 @@ export function stringifyYaml(data: unknown): string {
  * comments included. Used for lifecycle fields of Human-owned files.
  */
 export function setYamlTopLevel(text: string, values: Readonly<Record<string, unknown>>): string {
-  const doc = parseDocument(text);
+  const doc = yaml().parseDocument(text);
   for (const [key, value] of Object.entries(values)) {
     if (value === undefined) doc.delete(key);
     else doc.set(key, value);
@@ -49,8 +58,8 @@ export function setYamlTopLevel(text: string, values: Readonly<Record<string, un
  * no explicit tags, no anchors or aliases. Alias expansion limits stay enabled.
  */
 export function parseYaml(input: YamlInput): ParseResult<ParsedYaml> {
-  const lineCounter = new LineCounter();
-  const doc = parseDocument(input.text, {
+  const lineCounter = new (yaml().LineCounter)();
+  const doc = yaml().parseDocument(input.text, {
     lineCounter,
     prettyErrors: false,
     uniqueKeys: true,
@@ -87,7 +96,7 @@ export function parseYaml(input: YamlInput): ParseResult<ParsedYaml> {
       diagnostics.push(createDiagnostic("YAML_ALIAS_NOT_ALLOWED", `YAML anchor "&${node.anchor}" is not allowed`, rangeOf(node)));
     }
   };
-  visit(doc, {
+  yaml().visit(doc, {
     Scalar: (_key, node) => checkNode(node),
     Map: (_key, node) => checkNode(node),
     Seq: (_key, node) => checkNode(node),
@@ -108,12 +117,12 @@ export function parseYaml(input: YamlInput): ParseResult<ParsedYaml> {
     if (target === "key" && path.length > 0) {
       const parent = path.length > 1 ? doc.getIn(path.slice(0, -1), true) : doc.contents;
       const key = path[path.length - 1];
-      if (!isMap(parent)) return undefined;
-      const pair = parent.items.find((item) => (isScalar(item.key) ? item.key.value : item.key) === key);
-      return pair && isNode(pair.key) ? rangeOf(pair.key) : undefined;
+      if (!yaml().isMap(parent)) return undefined;
+      const pair = parent.items.find((item) => (yaml().isScalar(item.key) ? item.key.value : item.key) === key);
+      return pair && yaml().isNode(pair.key) ? rangeOf(pair.key) : undefined;
     }
     const node = path.length === 0 ? doc.contents : doc.getIn(path, true);
-    return isNode(node) ? rangeOf(node) : undefined;
+    return yaml().isNode(node) ? rangeOf(node) : undefined;
   };
   return success({ data, locate }, diagnostics);
 }

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import type { RepoPath } from "@duo-director/core";
@@ -35,6 +36,8 @@ describe("TypeScriptModuleResolver on TypeScript 6 (contract fixed here; upgrade
     expect(TYPESCRIPT_VERSION).toMatch(/^6\.0\./);
     // Stored resolutions are recomputed when the adapter rules or the TypeScript version change (TASK-008).
     expect(TYPESCRIPT_MODULE_RESOLUTION_VERSION).toBe(`1+typescript-${TYPESCRIPT_VERSION}`);
+    // #8: the version is read from typescript/package.json so the compiler can load later; it must be what the compiler reports.
+    expect(TYPESCRIPT_VERSION).toBe((createRequire(import.meta.url)("typescript") as { version: string }).version);
   });
 
   it("NodeNext: .js specifier → .ts source, extensionless and directory imports stay unresolved", () => {

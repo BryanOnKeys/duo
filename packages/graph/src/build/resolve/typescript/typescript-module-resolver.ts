@@ -4,10 +4,10 @@
  * ".js" → ".ts" substitution. This file is the only place that imports "typescript"
  * (scripts/boundaries.json typescriptApi); no TypeScript type leaves it.
  */
-import { builtinModules } from "node:module";
+import { builtinModules, createRequire } from "node:module";
 import nodePath from "node:path";
 import { createDiagnostic, normalizeRepoPath, type Diagnostic, type RepoPath } from "@duo-director/core";
-import ts from "typescript";
+import type ts from "typescript";
 import type { ModuleResolution, ModuleResolutionRequest, ModuleResolver } from "../module-resolver.js";
 
 export interface TypeScriptModuleResolverOptions {
@@ -31,19 +31,31 @@ const URL_SPECIFIER = /^[a-z][a-z0-9+.-]*:/iu;
 const DECLARATION = /\.d\.[cm]?ts$/u;
 const EXPLICIT_JS_EXTENSION = /\.[cm]?jsx?$/u;
 
-/** Options for files without a tsconfig.json/jsconfig.json: relative local modules only. */
-const NO_CONFIG_OPTIONS: ts.CompilerOptions = {
-  module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true, noEmit: true,
-};
+const load = createRequire(import.meta.url);
+let compiler: typeof ts | undefined;
+/**
+ * #8: the TypeScript compiler (about 0.2 s to load) is read when a resolver is first created, never when the CLI or
+ * the MCP server starts. The version comes from its package.json, which is what ts.version reports.
+ */
+function typescript(): typeof ts {
+  return (compiler ??= load("typescript") as typeof ts);
+}
 
-export const TYPESCRIPT_VERSION: string = ts.version;
+/** Options for files without a tsconfig.json/jsconfig.json: relative local modules only. */
+const noConfigOptions = (api: typeof ts): ts.CompilerOptions => ({
+  module: api.ModuleKind.ESNext, moduleResolution: api.ModuleResolutionKind.Bundler, allowJs: true, noEmit: true,
+});
+
+export const TYPESCRIPT_VERSION: string = (load("typescript/package.json") as { version: string }).version;
 /** DUO adapter rules (1) + TypeScript engine version. A change recomputes stored resolutions. */
-export const TYPESCRIPT_MODULE_RESOLUTION_VERSION = `1+typescript-${ts.version}`;
+export const TYPESCRIPT_MODULE_RESOLUTION_VERSION = `1+typescript-${TYPESCRIPT_VERSION}`;
 
 const isRelative = (s: string) => s === "." || s === ".." || s.startsWith("./") || s.startsWith("../");
 const posix = (p: string) => p.replace(/\\/g, "/");
 
 export function createTypeScriptModuleResolver(options: TypeScriptModuleResolverOptions): ModuleResolver {
+  const api = typescript();
+  const NO_CONFIG_OPTIONS = noConfigOptions(api);
   const root = nodePath.resolve(options.root);
   const diagnostics: Diagnostic[] = [];
   const diagnosticsByConfig = new Map<string, Diagnostic[]>();
@@ -51,13 +63,13 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
   const nearest = new Map<string, Config | undefined>();
   const results = new Map<string, ModuleResolution>();
   const host: ts.ModuleResolutionHost = {
-    fileExists: (f) => ts.sys.fileExists(f),
-    readFile: (f) => ts.sys.readFile(f),
-    directoryExists: (d) => ts.sys.directoryExists(d),
-    realpath: (p) => (ts.sys.realpath === undefined ? p : ts.sys.realpath(p)),
+    fileExists: (f) => api.sys.fileExists(f),
+    readFile: (f) => api.sys.readFile(f),
+    directoryExists: (d) => api.sys.directoryExists(d),
+    realpath: (p) => (api.sys.realpath === undefined ? p : api.sys.realpath(p)),
     getCurrentDirectory: () => root,
-    getDirectories: (d) => ts.sys.getDirectories(d),
-    useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
+    getDirectories: (d) => api.sys.getDirectories(d),
+    useCaseSensitiveFileNames: api.sys.useCaseSensitiveFileNames,
   };
 
   const toRepoPath = (absolute: string): RepoPath | undefined => {
@@ -71,20 +83,20 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
     const cached = configs.get(file);
     if (cached !== undefined) return cached;
     // readConfigFile reports syntax errors; readJsonConfigFile + parse also records the extends chain.
-    const read = ts.readConfigFile(file, (f) => ts.sys.readFile(f));
+    const read = api.readConfigFile(file, (f) => api.sys.readFile(f));
     const repoPath = toRepoPath(file);
     const own: Diagnostic[] = [];
     if (repoPath !== undefined) diagnosticsByConfig.set(repoPath, own);
     const report = (d: ts.Diagnostic) => {
-      if (d.category !== ts.DiagnosticCategory.Error) return;
-      const diagnostic = createDiagnostic("TSCONFIG_INVALID", `${repoPath ?? file}: ${ts.flattenDiagnosticMessageText(d.messageText, " ")}`, repoPath === undefined ? undefined : { path: repoPath });
+      if (d.category !== api.DiagnosticCategory.Error) return;
+      const diagnostic = createDiagnostic("TSCONFIG_INVALID", `${repoPath ?? file}: ${api.flattenDiagnosticMessageText(d.messageText, " ")}`, repoPath === undefined ? undefined : { path: repoPath });
       diagnostics.push(diagnostic);
       own.push(diagnostic);
     };
     if (read.error !== undefined) report(read.error);
-    const source = ts.readJsonConfigFile(posix(file), (f) => ts.sys.readFile(f));
-    const parsed = ts.parseJsonSourceFileConfigFileContent(
-      source, ts.sys, nodePath.dirname(file), isJs ? { allowJs: true } : undefined, posix(file),
+    const source = api.readJsonConfigFile(posix(file), (f) => api.sys.readFile(f));
+    const parsed = api.parseJsonSourceFileConfigFileContent(
+      source, api.sys, nodePath.dirname(file), isJs ? { allowJs: true } : undefined, posix(file),
     );
     // "No inputs were found" (18003) only concerns compilation, not resolution.
     parsed.errors.filter((d) => d.code !== 18003).forEach(report);
@@ -93,7 +105,7 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
       .filter((p): p is RepoPath => p !== undefined && !p.split("/").includes("node_modules"));
     const config: Config = {
       key: file, ...(repoPath === undefined ? {} : { path: repoPath }), options: parsed.options,
-      cache: ts.createModuleResolutionCache(root, (f) => f, parsed.options),
+      cache: api.createModuleResolutionCache(root, (f) => f, parsed.options),
       files: [...new Set([...(repoPath === undefined ? [] : [repoPath]), ...extended])],
     };
     configs.set(file, config);
@@ -106,8 +118,8 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
     let found: Config | undefined;
     const ts1 = nodePath.join(dir, "tsconfig.json");
     const js1 = nodePath.join(dir, "jsconfig.json");
-    if (ts.sys.fileExists(ts1)) found = loadConfig(ts1, false);
-    else if (ts.sys.fileExists(js1)) found = loadConfig(js1, true);
+    if (api.sys.fileExists(ts1)) found = loadConfig(ts1, false);
+    else if (api.sys.fileExists(js1)) found = loadConfig(js1, true);
     else if (nodePath.resolve(dir) !== root) {
       const parent = nodePath.dirname(dir);
       found = parent === dir ? undefined : configFor(parent);
@@ -115,7 +127,7 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
     nearest.set(dir, found);
     return found;
   };
-  const noConfig: Config = { key: "", options: NO_CONFIG_OPTIONS, cache: ts.createModuleResolutionCache(root, (f) => f, NO_CONFIG_OPTIONS), files: [] };
+  const noConfig: Config = { key: "", options: NO_CONFIG_OPTIONS, cache: api.createModuleResolutionCache(root, (f) => f, NO_CONFIG_OPTIONS), files: [] };
 
   const resolveUncached = (request: ModuleResolutionRequest): ModuleResolution => {
     const { specifier } = request;
@@ -127,11 +139,11 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
     // Without a config DUO knows no project semantics: only relative local modules are resolved.
     if (config === undefined && !isRelative(specifier)) return { status: "external", reason: "package" };
     const active = config ?? noConfig;
-    const implied = ts.getImpliedNodeFormatForFile(containing, active.cache.getPackageJsonInfoCache(), host, active.options);
-    const mode = request.kind === "require" ? ts.ModuleKind.CommonJS
-      : request.kind === "dynamic-import" ? ts.ModuleKind.ESNext
+    const implied = api.getImpliedNodeFormatForFile(containing, active.cache.getPackageJsonInfoCache(), host, active.options);
+    const mode = request.kind === "require" ? api.ModuleKind.CommonJS
+      : request.kind === "dynamic-import" ? api.ModuleKind.ESNext
         : implied;
-    const resolved = ts.resolveModuleName(specifier, containing, active.options, host, active.cache, undefined, mode).resolvedModule;
+    const resolved = api.resolveModuleName(specifier, containing, active.options, host, active.cache, undefined, mode).resolvedModule;
     if (resolved === undefined) return isRelative(specifier) ? { status: "unresolved", reason: "not-found" } : { status: "external", reason: "package" };
     const file = posix(resolved.resolvedFileName);
     if (resolved.isExternalLibraryImport === true || file.split("/").includes("node_modules")) return { status: "external", reason: "package" };
@@ -157,7 +169,7 @@ export function createTypeScriptModuleResolver(options: TypeScriptModuleResolver
       const known = diagnosticsByConfig.get(configPath);
       if (known !== undefined || opts?.load !== true) return known;
       const absolute = nodePath.join(root, configPath);
-      if (!ts.sys.fileExists(absolute)) return undefined;
+      if (!api.sys.fileExists(absolute)) return undefined;
       loadConfig(absolute, configPath.endsWith("jsconfig.json"));
       return diagnosticsByConfig.get(configPath);
     },

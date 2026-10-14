@@ -111,6 +111,13 @@ describe("the packed artifact (npm pack is the oracle)", () => {
     expect(fs.readFileSync(path.join(REPO, ".dist", "cli-package", "dist", "duoctl.js"), "utf8").startsWith("#!/usr/bin/env node")).toBe(true);
   });
 
+  it("#8: the bundle loads the heavy libraries on first use; no chunk imports them statically, so duoctl mcp answers initialize sooner", () => {
+    const dist = path.join(REPO, ".dist", "cli-package", "dist");
+    const statics = fs.readdirSync(dist).filter((f) => f.endsWith(".js")).flatMap((f) => [...fs.readFileSync(path.join(dist, f), "utf8").matchAll(/^import\s[^;]*?from\s*"([^"]+)";?$/gmu)].map((m) => m[1] as string));
+    const lazy = ["typescript", "gpt-tokenizer", "@modelcontextprotocol/client", "yaml", "mdast-util-from-markdown", "mdast-util-frontmatter", "micromark-extension-frontmatter"];
+    expect(statics.filter((s) => lazy.some((l) => s === l || s.startsWith(`${l}/`)))).toEqual([]);
+    expect(statics).toEqual(expect.arrayContaining(["@modelcontextprotocol/server", "zod"]));
+  });
   it("packing again gives the same files, bytes and metadata (deterministic)", () => {
     const out = tmp("duo-pack2-");
     execFileSync(process.execPath, [path.join(REPO, "scripts", "pack-cli.mjs"), "--out", out], { cwd: REPO, windowsHide: true, stdio: "pipe" });

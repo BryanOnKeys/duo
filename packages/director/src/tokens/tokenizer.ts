@@ -6,7 +6,15 @@
  * Special-token text such as "<|endoftext|>" in repository content is measured as ordinary text:
  * DUO counts what it would send, it never emits control tokens.
  */
-import { decode, encode } from "gpt-tokenizer/encoding/o200k_base";
+import { createRequire } from "node:module";
+
+type O200kBase = typeof import("gpt-tokenizer/encoding/o200k_base");
+const load = createRequire(import.meta.url);
+let o200k: O200kBase | undefined;
+/** #8: the encoding (about 0.15 s to load) is read on the first count, never when the CLI or the MCP server starts. */
+function encoding(): O200kBase {
+  return (o200k ??= load("gpt-tokenizer/encoding/o200k_base") as O200kBase);
+}
 
 /** The official estimator. version is the exact library version pinned in package.json (checked by a test). */
 export const TOKEN_ESTIMATOR = { name: "o200k_base", library: "gpt-tokenizer", version: "4.0.0" } as const;
@@ -20,7 +28,7 @@ const PLAIN_TEXT = { disallowedSpecial: new Set<string>() };
 
 /** o200k_base token count of text. */
 export function countTokens(text: string): number {
-  return text.length === 0 ? 0 : encode(text, PLAIN_TEXT).length;
+  return text.length === 0 ? 0 : encoding().encode(text, PLAIN_TEXT).length;
 }
 
 /** A token value always travels with its estimator and the provider-independent sizes (AC-010-06). */
@@ -53,9 +61,9 @@ export function codePoints(text: string): number {
 
 /** The first maxTokens tokens of text (a prefix of the text; a split multi-byte character is dropped). */
 export function truncateToTokens(text: string, maxTokens: number): { readonly text: string; readonly truncated: boolean } {
-  const tokens = encode(text, PLAIN_TEXT);
+  const tokens = encoding().encode(text, PLAIN_TEXT);
   if (tokens.length <= maxTokens) return { text, truncated: false };
-  return { text: decode(tokens.slice(0, Math.max(0, maxTokens))).replace(/\uFFFD+$/u, ""), truncated: true };
+  return { text: encoding().decode(tokens.slice(0, Math.max(0, maxTokens))).replace(/\uFFFD+$/u, ""), truncated: true };
 }
 
 /**

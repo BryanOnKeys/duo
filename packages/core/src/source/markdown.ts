@@ -3,10 +3,24 @@
  * structures (headings, fenced code, list items, links, text) with source positions.
  */
 import type { Nodes, Paragraph, Root } from "mdast";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { frontmatterFromMarkdown } from "mdast-util-frontmatter";
-import { frontmatter } from "micromark-extension-frontmatter";
+import { createRequire } from "node:module";
 import { createDiagnostic, failure, success, type ParseResult, type SourceLocation } from "../diagnostics.js";
+
+interface MarkdownLibraries {
+  readonly fromMarkdown: typeof import("mdast-util-from-markdown").fromMarkdown;
+  readonly frontmatterFromMarkdown: typeof import("mdast-util-frontmatter").frontmatterFromMarkdown;
+  readonly frontmatter: typeof import("micromark-extension-frontmatter").frontmatter;
+}
+const load = createRequire(import.meta.url);
+let libraries: MarkdownLibraries | undefined;
+/** #8: the Markdown parser (about 0.15 s to load) is read on the first parse, never when the CLI or the MCP server starts. */
+function markdown(): MarkdownLibraries {
+  return (libraries ??= {
+    fromMarkdown: (load("mdast-util-from-markdown") as typeof import("mdast-util-from-markdown")).fromMarkdown,
+    frontmatterFromMarkdown: (load("mdast-util-frontmatter") as typeof import("mdast-util-frontmatter")).frontmatterFromMarkdown,
+    frontmatter: (load("micromark-extension-frontmatter") as typeof import("micromark-extension-frontmatter")).frontmatter,
+  });
+}
 
 /** Offsets are 0-based character offsets into the document text. */
 export interface MarkdownSpan {
@@ -124,6 +138,7 @@ function paragraphLines(p: Paragraph): { detect: string[]; display: string[] } {
 export function parseMarkdown(path: string, text: string): ParseResult<MarkdownDocument> {
   let tree: Root;
   try {
+    const { fromMarkdown, frontmatter, frontmatterFromMarkdown } = markdown();
     tree = fromMarkdown(text, { extensions: [frontmatter(["yaml"])], mdastExtensions: [frontmatterFromMarkdown(["yaml"])] });
   } catch (error) {
     return failure([createDiagnostic("MARKDOWN_PARSE_ERROR", String(error), { path })]);
