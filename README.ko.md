@@ -80,13 +80,14 @@ Indexed (incremental) · 14 files · 0 parsed · 0 changed · graph unchanged
 $ duoctl review
 BLOCK  1 claims · 1 files · llm_calls 0
   CONFLICT  decision-forbids-import    D-001 · forbidden-import [blocking, not-in-adoption-baseline]
+            observed: forbidden import on a changed line: src/ui/legacy-orders-page.ts:1 import "../db/legacy-db.js" resolves to src/db/legacy-db.ts
             evidence: .duo-project/decisions/D-001.yaml:1-28, src/db/legacy-db.ts, src/ui/legacy-orders-page.ts:1-1
 Limitations:
   calls-exact-only
   no-task-scope
 ```
 
-이 import는 adoption baseline에 없으므로 D-001이 BLOCK합니다. claim은 Decision을 밝히고 Decision 파일, import된 파일, 바뀐 import 줄을 가리킵니다. `--json`에서 claim은 `provenance: "introduced"`, `expected`("no changed import resolves to src/db/legacy-db.ts (D-001)"), `observed`("forbidden import on a changed line: src/ui/legacy-orders-page.ts:1 import "../db/legacy-db.js" resolves to src/db/legacy-db.ts")를 가집니다. `introduced`는 위반이 adoption baseline에 없다는 뜻일 뿐 이번 변경이 import를 만들었다는 뜻이 아닙니다. `src/services/legacy-report.ts`의 기존 import는 변경이 그 줄을 고칠 때만 보고됩니다.
+이 import는 adoption baseline에 없으므로 D-001이 BLOCK합니다. claim은 Decision을 밝히고, 금지된 import의 파일과 줄(`observed`)을 보이고, Decision 파일, import된 파일, 바뀐 줄을 가리킵니다. `--json`의 claim에는 `provenance: "introduced"`와 `expected`("no changed import resolves to src/db/legacy-db.ts (D-001)")도 있습니다. `introduced`는 위반이 adoption baseline에 없다는 뜻일 뿐 이번 변경이 import를 만들었다는 뜻이 아닙니다. `src/services/legacy-report.ts`의 기존 import는 변경이 그 줄을 고칠 때만 보고됩니다.
 
 `imported_paths`는 repository 파일 하나로 정확히 해석되는 바뀐 import 줄을 확인합니다: TypeScript와 JavaScript, 그리고 DUO가 module을 해석하는 범위의 Python과 C++입니다. Java와 C#의 import, 해석되지 않는 import, barrel 파일을 거친 import는 확인하지 않으며 review가 확인하지 못한 것을 limitation으로 보여 줍니다.
 

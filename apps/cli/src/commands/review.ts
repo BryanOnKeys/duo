@@ -40,6 +40,9 @@ function renderReview(env: Env, r: ReviewResult): string[] {
     out.push(`  ${c.alignment.padEnd(9)} ${c.rule.padEnd(26)} ${c.subject.id} · ${c.reason}${tags === "" ? "" : ` [${tags}]`}`);
     // C241: the lifecycle of the Decision a shown claim is about (current authority, supersedes, superseded by).
     if (c.decisionAuthority !== undefined) out.push(`            ${t(L, "review.authority", { label: decisionAuthorityLabel(c.decisionAuthority, L) })}`);
+    // #16: what the rule found, with its exact location when the rule has one (a forbidden import names its line). The
+    // evidence ranges below are diff hunks, which for a new file cover the whole file.
+    if (c.alignment === "CONFLICT" && c.observed !== "") out.push(`            observed: ${c.observed}`);
     const pointers = c.evidenceIds.map((id) => ev.get(id)?.pointer).filter((p) => p?.path !== undefined).slice(0, 3)
       .map((p) => `${p?.path ?? ""}${p?.lines === undefined ? "" : `:${p.lines[0]}-${p.lines[1]}`}`);
     if (pointers.length > 0) out.push(`            evidence: ${pointers.join(", ")}`);

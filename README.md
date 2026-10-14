@@ -80,13 +80,14 @@ Indexed (incremental) · 14 files · 0 parsed · 0 changed · graph unchanged
 $ duoctl review
 BLOCK  1 claims · 1 files · llm_calls 0
   CONFLICT  decision-forbids-import    D-001 · forbidden-import [blocking, not-in-adoption-baseline]
+            observed: forbidden import on a changed line: src/ui/legacy-orders-page.ts:1 import "../db/legacy-db.js" resolves to src/db/legacy-db.ts
             evidence: .duo-project/decisions/D-001.yaml:1-28, src/db/legacy-db.ts, src/ui/legacy-orders-page.ts:1-1
 Limitations:
   calls-exact-only
   no-task-scope
 ```
 
-The import is not in the adoption baseline, so D-001 blocks it. The claim names the Decision and points to the Decision file, the imported file and the changed import line. In `--json` the claim has `provenance: "introduced"`, `expected` ("no changed import resolves to src/db/legacy-db.ts (D-001)") and `observed` ("forbidden import on a changed line: src/ui/legacy-orders-page.ts:1 import "../db/legacy-db.js" resolves to src/db/legacy-db.ts"). `introduced` only means the violation is absent from the adoption baseline, not that this change created the import. The existing import in `src/services/legacy-report.ts` is reported only when a change edits that line.
+The import is not in the adoption baseline, so D-001 blocks it. The claim names the Decision, shows the forbidden import with its file and line (`observed`), and points to the Decision file, the imported file and the changed lines. In `--json` the claim also has `provenance: "introduced"` and `expected` ("no changed import resolves to src/db/legacy-db.ts (D-001)"). `introduced` only means the violation is absent from the adoption baseline, not that this change created the import. The existing import in `src/services/legacy-report.ts` is reported only when a change edits that line.
 
 `imported_paths` checks changed import lines that resolve to exactly one repository file: TypeScript and JavaScript, and Python and C++ where DUO resolves the module. Java and C# imports, unresolved imports and imports through a barrel file are not checked; the review lists what it could not check.
 
