@@ -185,6 +185,15 @@ duoctl review                      # or: duoctl review --fail-on block in CI
 duoctl decision list               # pending proposals; confirm or reject in a terminal
 ```
 
+Without a terminal (for example in a script), `duoctl init --non-interactive --answers -` reads the answers as a JSON array on stdin. Each question you answer has its own shape; leave a question out to keep it open:
+
+```bash
+echo '[{"question":"project_goal","value":"Keep recurring chores fair."},
+      {"question":"current_milestone","title":"MVP"},
+      {"question":"critical_constraints","statements":["No cloud sync","Durations are whole minutes"]}]' \
+  | duoctl init --non-interactive --answers -
+```
+
 The MCP tools do not index; when an agent gets `index-required`, run `duoctl index`. Commands: [CLI reference](docs/07-cli-interface.md). MCP tools and install contract: [MCP interface](docs/06-mcp-interface.md).
 
 ## Optional LLM assistance

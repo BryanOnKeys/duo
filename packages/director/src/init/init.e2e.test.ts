@@ -211,6 +211,32 @@ describe("applyInitPlan (TASK-014)", () => {
     expect(loadProjectTruth(repo.root).value?.truth.vision).toMatchObject({ status: "confirmed", sources: [{ kind: "external", path: "README.md", hash: q?.evidence?.[0]?.hash }] });
   });
 
+  it("#15: an answer with the wrong shape names the question, the field and an example; nothing is written", async () => {
+    const repo = fresh();
+    const p = await plan(repo.root);
+    const cases: [unknown, string][] = [
+      [{ question: "critical_constraints", value: "No legacy DB" }, 'critical_constraints needs "statements": an array of strings, for example {"question":"critical_constraints","statements":["No cloud sync"]}'],
+      [{ question: "critical_constraints", statements: "No legacy DB" }, 'critical_constraints needs "statements"'],
+      [{ question: "critical_constraints", statements: ["ok", 3] }, 'critical_constraints needs "statements"'],
+      [{ question: "current_milestone", value: "MVP" }, 'current_milestone needs "title": a string, for example {"question":"current_milestone","title":"MVP"}'],
+      [{ question: "project_goal", goal: "x" }, 'project_goal needs "value": a string'],
+      [{ question: "project_goal", value: "x", acceptSuggestion: "yes" }, 'project_goal "acceptSuggestion" must be true or false'],
+      [{ value: "x" }, 'each answer needs "question"'],
+      ["No legacy DB", "each answer must be an object"],
+      [null, "each answer must be an object"],
+    ];
+    for (const [answer, message] of cases) {
+      const r = await applyInitPlan(repo.root, p, [answer] as never);
+      expect(r.value, JSON.stringify(answer)).toBeUndefined();
+      expect(r.diagnostics.map((d) => d.code)).toEqual(["INIT_ANSWER_INVALID"]);
+      expect(r.diagnostics[0]?.message).toContain(message);
+    }
+    expect(fs.existsSync(path.join(repo.root, ".duo-project"))).toBe(false);
+    // Extra keys are still ignored, as before.
+    const ok = await applyInitPlan(repo.root, p, [{ question: "critical_constraints", statements: ["No cloud sync"], note: "from a script" }] as never);
+    expect(ok.value?.openQuestions).toEqual(["project_goal", "current_milestone"]);
+  });
+
   it("an initialized repository is refused and left unchanged; a second init never resets Truth", async () => {
     const repo = fresh();
     const first = await plan(repo.root);

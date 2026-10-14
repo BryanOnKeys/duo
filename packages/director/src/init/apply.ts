@@ -82,10 +82,42 @@ const MAX_GOAL = 4000;
 const MAX_LINE = 500;
 const invalid = (message: string) => failure<never>([createDiagnostic("INIT_ANSWER_INVALID", message)]);
 
+/** One example per question, shown when an answer has the wrong shape (#15). docs/07-cli-interface.md lists the same shapes. */
+export const INIT_ANSWER_EXAMPLES: Readonly<Record<InitAnswer["question"], string>> = {
+  project_goal: '{"question":"project_goal","value":"Keep recurring chores fair."}',
+  current_milestone: '{"question":"current_milestone","title":"MVP"}',
+  critical_constraints: '{"question":"critical_constraints","statements":["No cloud sync"]}',
+};
+const isString = (v: unknown): v is string => typeof v === "string";
+
+/**
+ * #15: answers usually come from JSON on stdin, so their shape is checked before any field is read: a wrong shape
+ * names the question, the field it needs and an example instead of failing inside the code. Extra keys are ignored.
+ */
+function answerShapeProblem(a: unknown): string | undefined {
+  const all = Object.values(INIT_ANSWER_EXAMPLES).join(", ");
+  if (a === null || typeof a !== "object" || Array.isArray(a)) return `each answer must be an object with "question", for example ${all}`;
+  const r = a as Record<string, unknown>;
+  if (!isString(r.question)) return `each answer needs "question": one of project_goal, current_milestone, critical_constraints (for example ${INIT_ANSWER_EXAMPLES.project_goal})`;
+  if (r.question === "project_goal") {
+    if (!isString(r.value)) return `project_goal needs "value": a string, for example ${INIT_ANSWER_EXAMPLES.project_goal}`;
+    if (r.acceptSuggestion !== undefined && typeof r.acceptSuggestion !== "boolean") return 'project_goal "acceptSuggestion" must be true or false';
+  } else if (r.question === "current_milestone") {
+    if (!isString(r.title)) return `current_milestone needs "title": a string, for example ${INIT_ANSWER_EXAMPLES.current_milestone}`;
+  } else if (r.question === "critical_constraints") {
+    if (!Array.isArray(r.statements) || !r.statements.every(isString)) return `critical_constraints needs "statements": an array of strings, for example ${INIT_ANSWER_EXAMPLES.critical_constraints}`;
+  }
+  return undefined;
+}
+
 /** Checks the answers against the plan's questions. */
 export function normalizeInitAnswers(plan: InitPlan, answers: readonly InitAnswer[]): ParseResult<NormalizedAnswers> {
   const asked = new Map(plan.questions.map((q) => [q.id, q] as const));
   const seen = new Set<string>();
+  for (const a of answers as readonly unknown[]) {
+    const problem = answerShapeProblem(a);
+    if (problem !== undefined) return invalid(problem);
+  }
   let goal: NormalizedAnswers["goal"];
   let milestone: NormalizedAnswers["milestone"];
   let constraints: string[] | undefined;

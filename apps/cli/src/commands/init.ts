@@ -9,7 +9,7 @@
  * dirty-tree adoption policy.
  */
 import {
-  applyInitPlan, captureAdoptionBaseline, getAdoptionBaselineStatus, planInit, type InitAnswer, type InitApplyResult, type InitPlan, type InitQuestion,
+  applyInitPlan, captureAdoptionBaseline, INIT_ANSWER_EXAMPLES, getAdoptionBaselineStatus, planInit, type InitAnswer, type InitApplyResult, type InitPlan, type InitQuestion,
 } from "@duo-director/director";
 import { createDiagnostic, type Diagnostic } from "@duo-director/core";
 import { indexRepository, inspectIndex, type IndexResult } from "@duo-director/graph";
@@ -30,7 +30,7 @@ function parseAnswers(text: string): InitAnswer[] | string {
   try {
     const v = JSON.parse(text) as unknown;
     const list = Array.isArray(v) ? v : (v as { answers?: unknown } | null)?.answers;
-    return Array.isArray(list) ? (list as InitAnswer[]) : "expected a JSON array of answers or { \"answers\": [...] }";
+    return Array.isArray(list) ? (list as InitAnswer[]) : `expected a JSON array of answers or { "answers": [...] }, for example [${INIT_ANSWER_EXAMPLES.project_goal}]`;
   } catch (error) {
     return `answers are not JSON: ${(error as Error).message}`;
   }

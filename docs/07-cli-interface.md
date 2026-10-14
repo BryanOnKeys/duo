@@ -105,7 +105,15 @@ DUO is set up: Truth, index and adoption baseline are ready. Next:
 - 단계 Repository(`planInit`), Truth(`applyInitPlan`), Index(`indexRepository`), Baseline(`captureAdoptionBaseline`)를 각각 보고한다. 한 단계가 실패하면 init은 성공이 아니며, 다시 실행하면 첫 미완료 단계부터 잇는다(기존 Truth는 `INIT_ALREADY_INITIALIZED`로 건드리지 않음, index가 current면 건너뜀, baseline이 있으면 건너뜀).
 - 성공한 init의 다음 단계(T26.1)는 Agent 연결(두 Agent를 같은 줄에, 기본 추천 없음)과 `duoctl doctor`다. init이 이미 index와 baseline을 만들었으므로 `duoctl index`를 다시 안내하지 않는다. UI는 선택으로 표시한다. 사람이 읽는 문구이며 `--json` 결과는 그대로다.
 - 질문(InitService의 `InitQuestion`)은 TTY에서만 묻는다: 프로젝트 Goal(README 첫 문단 또는 package.json description 제안, 받아들이면 README provenance), 현재 Milestone 또는 MVP 범위(제목, ID는 plan이 배정), Critical Constraint(';'로 구분, confirmed·warn). 관찰로 알 수 있는 것은 묻지 않는다. 답하지 않은 질문은 vision.md의 `UNKNOWN(<id>)` 줄이 되고 JSON `result.plan.questions`로 ASK 목록이 된다(AC-014-04).
-- 비대화형(`--non-interactive` 또는 TTY 없음)의 Human 답은 `--answers -`로 stdin JSON(`InitAnswer[]` 또는 `{ "answers": [...] }`)을 준다.
+- 비대화형(`--non-interactive` 또는 TTY 없음)의 Human 답은 `--answers -`로 stdin JSON(`InitAnswer[]` 또는 `{ "answers": [...] }`)을 준다. 질문마다 모양이 다르고, 답하지 않은 질문은 빼면 열린 질문으로 남는다(#15):
+
+  | question | 필드 | 예 |
+  |---|---|---|
+  | `project_goal` | `value`(문자열, 4,000자 이하), 선택 `acceptSuggestion`(true면 `value`가 plan의 제안과 같아야 하고 README provenance가 붙음) | `{"question":"project_goal","value":"Keep recurring chores fair."}` |
+  | `current_milestone` | `title`(한 줄, 500자 이하. ID는 plan이 배정) | `{"question":"current_milestone","title":"MVP"}` |
+  | `critical_constraints` | `statements`(문자열 배열, 각 한 줄 500자 이하) | `{"question":"critical_constraints","statements":["No cloud sync"]}` |
+
+  모양이 틀리면 아무것도 쓰지 않고 `INIT_ANSWER_INVALID`(종료 코드 1)로 끝나며, 메시지가 질문·필요한 필드·예를 말한다(예: `critical_constraints needs "statements": an array of strings, for example {...}`). 정해진 필드 밖의 key는 무시한다. plan에 없는 질문(이미 확정된 Goal 등)과 같은 질문의 중복 답도 `INIT_ANSWER_INVALID`다.
 - **`--yes`는 Human Intent를 만들어내는 옵션이 아니다.** 파일 생성 확인, partial repair 같은 operational 확인만 승인한다. README 제안 vision, 추론한 milestone, 제안 constraint, import 후보를 확정하지 않고, dirty adoption policy도 고르지 않는다.
 - Dirty working tree(staged, unstaged, untracked, conflicted; .duo-project와 secret 파일 제외)는 init 실패가 아니다. baseline에는 정책이 필요하다: `--baseline-policy head`(HEAD_BASELINE: baseline commit = HEAD, finding은 HEAD tree로 계산, 현재 변경은 adoption 이후 Review 대상으로 남음) 또는 `abort`(ABORT_AND_CLEAN: 종료 코드 6, 정리 후 다시 실행). **정책은 어떤 persistent write보다 먼저 정한다**(T15.1): baseline이 없는 dirty 저장소에서 정책이 없거나 `abort`면 `.duo-project`, graph.db, index-state.json, baseline, metrics를 하나도 만들지 않고 종료 코드 6(`ADOPTION_DIRTY_POLICY_REQUIRED` 또는 `aborted`, steps의 truth·index는 `skipped`)이다. TTY면 둘 중 하나를 stderr로 묻는다. 이미 초기화되어 baseline만 없는 project도 같은 순서다. dirty working tree 전체를 snapshot으로 삼는 정책은 MVP에 없다.
 - init이 만든 Truth 파일은 commit 전까지 HEAD→WORKTREE diff에 보이지만, baseline의 `bootstrapTruth`와 내용이 같으면 Review가 `adoption-bootstrap`으로 분류하고 WARN·BLOCK·ASK를 만들지 않는다. Human이 고친 Truth는 일반 Truth 변경이다(C138, [03](03-data-model.md#adoption-baseline-t141)).
