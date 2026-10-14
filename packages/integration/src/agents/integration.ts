@@ -150,8 +150,9 @@ export function planAgentIntegration(root: string, agent: AgentId, options: Plan
     bridgeAction = bridgeFile.text === undefined ? "create" : "modify";
   }
   for (const c of conflicts) blockers.push(createDiagnostic("AGENT_INTEGRATION_CONFLICT", `${c.target}: ${c.reason}`));
-  if (adapter.projectTrustRequired) warnings.push("Codex reads .codex/config.toml only in a trusted project; trust it in Codex yourself (DUO does not change trust).");
-  if (adapter.approvalRequired) warnings.push("Claude Code asks you to approve project MCP servers from .mcp.json; approve duo-director in Claude Code (DUO does not approve it).");
+  // #3(a): how to do the step outside DUO, from the agents' documentation (Codex config and security docs; Claude Code MCP docs, project scope).
+  if (adapter.projectTrustRequired) warnings.push("Codex reads .codex/config.toml only in a trusted project. Trust this folder yourself when Codex asks on first launch, or set trust_level = \"trusted\" for it under [projects] in ~/.codex/config.toml (DUO does not change trust).");
+  if (adapter.approvalRequired) warnings.push("Claude Code asks you to approve project MCP servers from .mcp.json. Run claude in this project, accept the workspace trust dialog and approve duo-director (DUO does not approve it).");
 
   const actions: [string, FileAction][] = [[adapter.mcpTarget, mcpAction], [adapter.bridgeTarget, bridgeAction]];
   return {
@@ -331,8 +332,8 @@ export async function verifyAgentIntegration(root: string, agent: AgentId, optio
   }
   const nextActions: string[] = [];
   if (server !== undefined && options.callStatus !== false && server.index !== "current") nextActions.push(`${launcherDisplay(launcher)} index`);
-  if (adapter.projectTrustRequired) nextActions.push("Trust this project in Codex so it loads .codex/config.toml.");
-  if (adapter.approvalRequired) nextActions.push("Approve the duo-director server in Claude Code (it asks for project .mcp.json servers).");
+  if (adapter.projectTrustRequired) nextActions.push("Trust this project in Codex so it loads .codex/config.toml (the trust prompt on first launch, or trust_level = \"trusted\" in ~/.codex/config.toml); then /mcp in Codex lists duo-director.");
+  if (adapter.approvalRequired) nextActions.push("Run claude in this project and approve the duo-director server; until then claude mcp get duo-director shows Pending approval.");
   const provenance = {
     kind: launcher.kind, command: launcher.command, argsPrefix: launcher.argsPrefix,
     ...(launch.resolved === undefined ? {} : { resolved: launch.resolved }), ...(launch.localBin === undefined ? {} : { localBin: launch.localBin }),

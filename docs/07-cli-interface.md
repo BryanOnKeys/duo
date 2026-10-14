@@ -66,7 +66,7 @@ Project Truth를 일부만 읽을 수 있거나 현재 Decision 집합이 모순
 Existing project → duoctl 설치(PATH) → duoctl init → duoctl install codex|claude-code
 ```
 
-- plan을 먼저 보인다(willCreate, willModify, conflicts, trust·approval 안내). TTY면 확인을 묻고, 비대화형은 `--yes`가 있어야 적용한다(없으면 종료 코드 6, `status: "confirmation-required"`, 쓰기 0).
+- plan을 먼저 보인다(willCreate, willModify, conflicts, trust·approval 안내). trust·approval 안내와 적용 후 다음 행동은 Agent 안에서 하는 방법까지 말한다(#3(a), 2026-10 각 Agent 공식 문서 기준): Codex는 첫 실행의 trust 질문 또는 `~/.codex/config.toml`의 `trust_level = "trusted"`, 확인은 `/mcp`. Claude Code는 project에서 `claude`를 실행해 workspace trust와 `duo-director` 승인, 승인 전 `claude mcp get duo-director`는 Pending approval. TTY면 확인을 묻고, 비대화형은 `--yes`가 있어야 적용한다(없으면 종료 코드 6, `status: "confirmation-required"`, 쓰기 0).
 - `--yes`는 계획한 파일 변경만 승인한다. 같은 이름의 다른 MCP 서버, 읽을 수 없는 설정, 깨진 bridge marker, launcher 가로채기 파일, Codex trust, Claude Code approval은 넘어가지 않는다.
 - apply 뒤 verify가 생성된 설정의 command로 DUO 서버를 직접 띄워 확인한다. index가 stale이면 install은 성공하고 다음 조치로 `duoctl index`를 보인다.
 - 두 번 실행하면 `unchanged`. install은 init, index, git add, commit을 하지 않는다. 바뀐 파일을 알려줄 뿐이다.

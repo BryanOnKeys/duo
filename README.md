@@ -107,7 +107,9 @@ duoctl doctor
 ```
 
 - `duoctl init` adopts an existing Git repository (it needs a first commit). It observes the repository, asks only what it cannot infer, writes a minimal Project Truth under `.duo-project/`, builds the first index and records the adoption baseline. With uncommitted changes, choose `--baseline-policy head` or `--baseline-policy abort`.
-- `duoctl install codex` or `duoctl install claude-code` shows the files it will change, then adds the MCP configuration (`.codex/config.toml` or `.mcp.json`) and a short instruction block (`AGENTS.md` or `CLAUDE.md`), and checks that the DUO server starts. Codex must trust the project; Claude Code asks you to approve the `duo-director` server. You commit the changes yourself.
+- `duoctl install codex` or `duoctl install claude-code` shows the files it will change, then adds the MCP configuration (`.codex/config.toml` or `.mcp.json`) and a short instruction block (`AGENTS.md` or `CLAUDE.md`), and checks that the DUO server starts. You commit the changes yourself. One step stays with you, in the agent, and DUO never does it for you:
+  - Codex loads `.codex/config.toml` only in a trusted project. Trust the folder when Codex asks on first launch, or add it to your `~/.codex/config.toml` with `[projects."/path/to/project"]` and `trust_level = "trusted"`. In Codex, `/mcp` then lists `duo-director`.
+  - Claude Code asks before it uses a server from `.mcp.json`. Run `claude` in the project, accept the workspace trust dialog and approve `duo-director`. Until then `claude mcp get duo-director` shows `Pending approval`; `claude mcp reset-project-choices` asks again.
 - `duoctl doctor` checks Git, Project Truth, the index, the analysis level per language, connected agents and the optional LLM settings, and lists the next one to three steps. It only reads.
 
 The local UI (`duoctl ui`) and LLM assistance are optional.
