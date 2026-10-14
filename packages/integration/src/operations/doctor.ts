@@ -14,7 +14,7 @@
 import path from "node:path";
 import { findGitTopLevel, openGitProvider, type GitProvider } from "@duo-director/analyzer";
 import { loadProjectTruth, truthAuthorityErrors, type Diagnostic, type LoadedProject } from "@duo-director/core";
-import { getAdoptionBaselineStatus, inspectStateDirectory, observeWorkingTree, redactSecrets } from "@duo-director/director";
+import { getAdoptionBaselineStatus, inspectStateDirectory, observeWorkingTree, redactSecrets, unscopedConstraintIds } from "@duo-director/director";
 import { inspectIndex, type IndexInspection } from "@duo-director/graph";
 import { agentAdapter, EXPECTED_MCP_TOOLS, inspectAgentIntegration, launcherOf, verifyAgentIntegration } from "../agents/integration.js";
 import { currentHost, launcherDisplay, type HostEnvironment } from "../agents/launcher.js";
@@ -159,7 +159,8 @@ export async function projectDoctor(rootArg: string, options: DoctorOptions): Pr
     } else if (loaded.value !== undefined) {
       project = loaded.value;
       const t = project.truth;
-      set("truth.project", "ok", "valid", { name: t.config.name, requirements: t.requirements.length, decisions: t.decisions.length, constraints: t.constraints.length });
+      // #14 (additive fact): confirmed Constraints that context and review never use.
+      set("truth.project", "ok", "valid", { name: t.config.name, requirements: t.requirements.length, decisions: t.decisions.length, constraints: t.constraints.length, unscopedConstraints: unscopedConstraintIds(t) });
     } else if (loaded.diagnostics.some((d) => d.code === "PROJECT_FILE_MISSING")) {
       const state = inspectStateDirectory(root);
       if (state.state === "partial" && state.conflicts.length === 0) {

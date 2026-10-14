@@ -461,6 +461,8 @@ constraints:
     source: [{path: README.md, hash: "sha256:abc123", section: Scope}]   # 선택: 외부 출처(ADR-014)
 ```
 
+Constraint는 결정적 검사가 아니다(ADR-007, C107/H-33). `match.paths`·`symbols`·`keywords`가 task나 변경과 관련될 때만 Context에 들어가고, review는 `constraint-compliance` claim(UNKNOWN, 의미 판단 필요, BLOCK 불가)을 만든다. `match.dependencies`와 `enforcement`는 관련성 판단에 쓰이지 않는다. 세 field가 모두 비어 있는 confirmed Constraint(init이 만드는 Constraint가 그렇다)는 어떤 task와도 관련되지 않으므로 Context와 review가 쓰지 않는다. #14(0.3.3 후보)부터 이런 Constraint ID를 `duo.status/1` `truth.unscopedConstraints`, doctor `truth.project` facts의 `unscopedConstraints`, review limitation `constraints-unscoped`로 보인다(모두 additive, verdict·claim·종료 코드 그대로). DUO가 결정적으로 검사해야 하는 규칙은 사람이 확정한 `forbids` Decision이다.
+
 ## decisions/D-###.yaml
 
 ```yaml
@@ -552,6 +554,7 @@ DecisionAuthority { state, active, supersedes, supersededBy }   // C241(T49): su
 - `decisionAuthority`(C241, T49, additive): subject가 Decision이고 rule이 읽은 같은 complete Project Truth에 그 ID가 있으면 붙는다. `state`·`supersedes`·`supersededBy`는 그 Decision 파일의 값 그대로이고, `active`는 rule이 쓰는 authority 판정(`confirmed`이고 `supersededBy`가 없음)이다. 직접 관계만 담고 chain을 풀거나 Git history에서 추론하지 않으며, 두 Decision의 값이 서로 맞지 않아도 고치지 않는다(판정은 `supersede-integrity`). verdict·claim ID·evidence 뒤에 붙는 설명이라 판정 signal이 아니고, semantic assist 입력과 Review Record body(따라서 Record ID)에 들어가지 않는다. Requirement·Constraint·file·test claim과 LLM semantic claim에는 없다.
 - PASS는 "DUO가 현재 Evidence 범위에서 방향 위반을 찾지 못했다"는 뜻이지 버그가 없다는 뜻이 아니다. PASS에도 surface된 `missing-intent` gap이 있을 수 있다(H-80): 확정 intent 연결을 찾지 못했다는 coverage signal이며 `verdictBasis.warn`에 들어가지 않는다. 다른 surface gap은 WARN 근거다.
 - T13.1 규칙: `unlinked-addition`(R-SCOPE, task가 있을 때 task 맥락 밖이고 IMPLEMENTS가 없는 추가 application 파일 → UNKNOWN drift, 의미 후보, BLOCK 불가), `external-source-drift`(R-DRIFT, 명시적 `{path, hash, section?}`의 hash 불일치 → PARTIAL). limitation `external-source-unavailable`(원격·저장소 밖·secret·없는 파일), `external-source-hash-invalid`.
+- limitation `constraints-unscoped`(#14, additive): match 범위가 없는 confirmed Constraint가 있으면 그 ID를 message에 적는다. 이 Constraint는 Context와 review가 쓰지 않았다는 뜻이며 verdict 근거가 아니다(verdict는 claim과 gap에서만 나온다).
 - `semanticAssist.provider`: 호출한 Provider의 `id`, 보고된 `model`, `cacheIdentity`(secret 없음).
 
 ### Review Record (reviews/)

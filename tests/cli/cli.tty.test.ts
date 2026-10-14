@@ -28,13 +28,15 @@ describe("interactive duoctl init (T15, terminal)", () => {
     const term = terminal(p.root, ["y", "Launch weekly rotations", "No cloud sync; Durations are whole minutes", ""]);
     expect(await run(["init"], term.io)).toBe(0);
     expect(term.asked.map((q) => q.split("?")[0]?.split(":")[0])).toEqual([
-      "Use the suggestion", "Current milestone or MVP scope (title, empty to skip)", "Critical constraints, separated by ';' (empty to skip)", "Create 5 files in .duo-project",
+      "Use the suggestion", "Current milestone or MVP scope (title, empty to skip)", "Critical constraints, separated by ';' (recorded as notes, not checked; empty to skip)", "Create 5 files in .duo-project",
     ]);
     const truth = loadProjectTruth(p.root).value?.truth;
     expect(truth?.vision).toMatchObject({ status: "confirmed", sources: [{ kind: "external", path: "README.md" }] });
     expect(truth?.config.currentMilestone).toBe("M1");
     expect(truth?.constraints.map((c) => c.statement)).toEqual(["No cloud sync", "Durations are whole minutes"]);
     expect(term.out.join("\n")).toContain("Baseline");
+    // #14: init says the recorded constraints are not checked and how a checked rule is made.
+    expect(term.out.join("\n")).toContain("Recorded 2 constraint(s) in intent/constraints.yaml as notes for you and your agent. DUO does not check them against changes");
   });
 
   it("--yes approves operations only: no Truth question is asked or answered", async () => {
@@ -45,6 +47,7 @@ describe("interactive duoctl init (T15, terminal)", () => {
     const truth = loadProjectTruth(p.root).value?.truth;
     expect(truth?.vision?.status).toBe("draft");
     expect(truth?.gaps.map((g) => g.key)).toEqual(["project_goal", "current_milestone", "critical_constraints"]);
+    expect(term.out.join("\n")).not.toContain("constraint(s) in intent/constraints.yaml");
   });
 
   it("a dirty tree asks for the adoption policy (never taken from --yes); choosing HEAD captures a dirty-at-adoption baseline", async () => {

@@ -94,6 +94,20 @@ export function matchConstraint(constraint: Constraint, scope: RelevanceScope): 
   return { relevance: "none", reasons: [{ code: "not-in-context", ref: constraint.id }] };
 }
 
+/**
+ * A Constraint that no Task can ever be related to (#14): `matchConstraint` reads only `match.paths`, `match.symbols`
+ * and `match.keywords`, so with all three empty it returns `none` for every scope. Such a Constraint is recorded Project
+ * Truth, but context and review never use it. Constraints are not deterministic checks (ADR-007, C107/H-33).
+ */
+export function isUnscopedConstraint(constraint: Constraint): boolean {
+  return constraint.match.paths.length === 0 && constraint.match.symbols.length === 0 && constraint.match.keywords.length === 0;
+}
+
+/** IDs of confirmed Constraints that context and review never use (#14), in file order. */
+export function unscopedConstraintIds(truth: Pick<ProjectTruth, "constraints">): string[] {
+  return truth.constraints.filter((c) => c.state === "confirmed" && isUnscopedConstraint(c)).map((c) => c.id);
+}
+
 function activeGoverning(truth: Pick<ProjectTruth, "decisions">, requirementId: string, scope: RelevanceScope): string | undefined {
   const inScope = new Set(scope.entries.filter((e) => e.type === "decision" && e.hops !== undefined).map((e) => e.ref));
   return truth.decisions.find((d) => d.state === "confirmed" && d.supersededBy === null && inScope.has(d.id) && d.governs.requirements.includes(requirementId))?.id;

@@ -13,7 +13,7 @@ import { performance } from "node:perf_hooks";
 import { openGitProvider, type AnalyzerRegistry } from "@duo-director/analyzer";
 import {
   canonicalDiagnostics, canonicalSourceText, compareUtf8, fileRef, loadProjectTruth, readSourceFile, requireCompleteTruth, sha256Text, stableJson, STATE_DIR_NAME, success,
-  type Diagnostic, type EvidenceBasis, type ParseResult,
+  type Diagnostic, type EvidenceBasis, type ParseResult, type ProjectTruth,
 } from "@duo-director/core";
 import type { GitDiffEnd, GitProvider } from "@duo-director/analyzer";
 import { inspectIndex, readIndexState, type GraphReader, type IndexedGraph } from "@duo-director/graph";
@@ -24,6 +24,7 @@ import type { TokenCountMemo } from "../context/metrics.js";
 import type { ContextPacket, ContextResult } from "../context/types.js";
 import { EvidenceStore } from "../evidence/store.js";
 import { assessKnowledgeGaps } from "../gap/assess.js";
+import { unscopedConstraintIds } from "../relevance/policy.js";
 import type { LLMProvider } from "../llm/contract/types.js";
 import { loadAdoptionBaseline } from "../adoption/baseline.js";
 import { PRE_T18_STRUCTURAL_LANGUAGES } from "../adoption/types.js";
@@ -88,6 +89,13 @@ function limitationsOf(files: ReviewResult["diff"], packet: ContextPacket | unde
   else if (!taskReady) out.push({ code: "task-scope-unavailable", message: "The task did not resolve to a context; scope drift is not checked." });
   if (f.length === 0) out.push({ code: "empty-diff", message: "The diff has no reviewable changes." });
   return out;
+}
+
+/** #14 (additive): confirmed Constraints without a match scope are never used by context or review; say so instead of a silent PASS. */
+function unscopedConstraintLimitation(truth: Pick<ProjectTruth, "constraints">): ReviewLimitation[] {
+  const ids = unscopedConstraintIds(truth);
+  if (ids.length === 0) return [];
+  return [{ code: "constraints-unscoped", message: `${ids.length} confirmed constraint(s) (${ids.join(", ")}) have no match scope, so context and review do not use them. Constraints are never checked deterministically; a rule DUO should check needs a confirmed Decision with forbids.` }];
 }
 
 const zeroMetrics = {
@@ -258,6 +266,7 @@ export async function reviewChanges(root: string, request: ReviewRequest, option
       ...drift.limitations,
       ...imports.limitations,
       ...outsideLimitation(diff.value.to, snapshot.value.outside),
+      ...unscopedConstraintLimitation(truth),
       ...(adoption.status === "incompatible" ? [{ code: "adoption-baseline-unusable", message: "The Adoption Baseline cannot be used (" + (adoption.reason ?? "unreadable") + "); violations are not told apart from pre-existing ones." }] : []),
     ],
     semanticAssist: semantic.assist,

@@ -104,7 +104,7 @@ DUO is set up: Truth, index and adoption baseline are ready. Next:
 
 - 단계 Repository(`planInit`), Truth(`applyInitPlan`), Index(`indexRepository`), Baseline(`captureAdoptionBaseline`)를 각각 보고한다. 한 단계가 실패하면 init은 성공이 아니며, 다시 실행하면 첫 미완료 단계부터 잇는다(기존 Truth는 `INIT_ALREADY_INITIALIZED`로 건드리지 않음, index가 current면 건너뜀, baseline이 있으면 건너뜀).
 - 성공한 init의 다음 단계(T26.1)는 Agent 연결(두 Agent를 같은 줄에, 기본 추천 없음)과 `duoctl doctor`다. init이 이미 index와 baseline을 만들었으므로 `duoctl index`를 다시 안내하지 않는다. UI는 선택으로 표시한다. 사람이 읽는 문구이며 `--json` 결과는 그대로다.
-- 질문(InitService의 `InitQuestion`)은 TTY에서만 묻는다: 프로젝트 Goal(README 첫 문단 또는 package.json description 제안, 받아들이면 README provenance), 현재 Milestone 또는 MVP 범위(제목, ID는 plan이 배정), Critical Constraint(';'로 구분, confirmed·warn). 관찰로 알 수 있는 것은 묻지 않는다. 답하지 않은 질문은 vision.md의 `UNKNOWN(<id>)` 줄이 되고 JSON `result.plan.questions`로 ASK 목록이 된다(AC-014-04).
+- 질문(InitService의 `InitQuestion`)은 TTY에서만 묻는다: 프로젝트 Goal(README 첫 문단 또는 package.json description 제안, 받아들이면 README provenance), 현재 Milestone 또는 MVP 범위(제목, ID는 plan이 배정), Critical Constraint(';'로 구분, confirmed·warn, 질문 문구에 "recorded as notes, not checked"를 보인다). Constraint를 기록하면 init은 그것이 사람과 Agent를 위한 메모이고 DUO가 변경과 대조해 검사하지 않으며, 검사할 규칙은 Agent가 `forbids` Decision을 제안(`duo_propose_decision`)하고 사람이 `duoctl decision confirm`으로 확정해야 한다는 줄을 더한다(#14, 사람 출력만). 관찰로 알 수 있는 것은 묻지 않는다. 답하지 않은 질문은 vision.md의 `UNKNOWN(<id>)` 줄이 되고 JSON `result.plan.questions`로 ASK 목록이 된다(AC-014-04).
 - 비대화형(`--non-interactive` 또는 TTY 없음)의 Human 답은 `--answers -`로 stdin JSON(`InitAnswer[]` 또는 `{ "answers": [...] }`)을 준다. 질문마다 모양이 다르고, 답하지 않은 질문은 빼면 열린 질문으로 남는다(#15):
 
   | question | 필드 | 예 |
@@ -133,6 +133,8 @@ Adoption baseline: current · 2f3355d5f46b · 0 findings
 Pending decisions: 0
 LLM: disabled
 ```
+
+match 범위가 없는 confirmed Constraint가 있으면 `Truth` 줄 아래에 `Constraints not checked: CON-001, CON-002. …` 줄을 보인다(#14). JSON은 `truth.unscopedConstraints`(additive, 없으면 빈 배열)이고 MCP `duo_get_status` text 요약에도 같은 ID가 붙는다. doctor는 `truth.project` facts에 `unscopedConstraints`를 더하고 그 check 아래에 같은 안내를 한 줄 보인다. check 상태(`ok`)와 종료 코드는 바뀌지 않는다. review는 limitation `constraints-unscoped`와 그 아래 ID 줄을 보인다.
 
 `LLM` 줄은 disabled, configured, unavailable과 provider·model, unavailable이면 이유(예: `LLM: unavailable · openai-responses gpt-… · OPENAI_API_KEY is not set`)를 보인다. `openai-compatible`은 transport와 endpoint의 origin(`scheme://host[:port]`, path 없음)을 더한다(예: `LLM: configured · openai-compatible m-1 · chat-completions · https://gateway.example`, T27.1, 사람 출력만). 설정과 환경만 보고 네트워크를 쓰지 않는다. key 값은 보이지 않는다.
 

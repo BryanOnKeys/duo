@@ -156,7 +156,10 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
     summarize: (p) => {
       const i = p.index as { status?: string } | null;
       const b = p.baseline as { status?: string } | null;
-      return `DUO status: index ${i?.status ?? "unknown"} · baseline ${b?.status ?? "unknown"} · pending decisions ${(p.pendingDecisions as unknown[] | undefined)?.length ?? 0} · llm ${String(p.llm)}`;
+      const unscoped = ((p.truth as { unscopedConstraints?: string[] } | undefined)?.unscopedConstraints ?? []);
+      // #14: an agent should not mistake a recorded constraint for a checked rule.
+      const constraints = unscoped.length === 0 ? "" : ` · constraints not checked: ${unscoped.join(", ")} (no match scope, so context and review do not use them; DUO checks rules deterministically only through confirmed Decisions with forbids)`;
+      return `DUO status: index ${i?.status ?? "unknown"} · baseline ${b?.status ?? "unknown"} · pending decisions ${(p.pendingDecisions as unknown[] | undefined)?.length ?? 0} · llm ${String(p.llm)}${constraints}`;
     },
   },
   duo_get_context: {

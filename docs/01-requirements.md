@@ -282,7 +282,7 @@ priority: must
 source: [D§1, H-3]
 ```
 
-명백한 Constraint와 Decision 위반은 규칙으로 판정한다. 의미 판단이 필요한 Scope Drift와 의도 충돌은 LLM에 escalation하며, LLM이 없으면 UNKNOWN 또는 ASK로 남긴다.
+명백한 Constraint와 Decision 위반은 규칙으로 판정한다. 의미 판단이 필요한 Scope Drift와 의도 충돌은 LLM에 escalation하며, LLM이 없으면 UNKNOWN 또는 ASK로 남긴다. (구현 해석, ADR-007 C107/H-33, #14: 결정적 위반 판정은 확정 Decision의 `forbids`가 한다. Constraint 문장은 match 범위가 관련될 때 의미 판단 대상 UNKNOWN claim이 되고, match 범위가 없는 Constraint는 검사되지 않으며 status·doctor·review가 그 ID를 보인다.)
 
 상세: [ADR-008](adr/ADR-008-deterministic-first.md) · ADR: [ADR-007](adr/ADR-007-verdict-model.md), [ADR-008](adr/ADR-008-deterministic-first.md) · Task: [TASK-013](tasks/TASKS.md#task-013-review-엔진)
 

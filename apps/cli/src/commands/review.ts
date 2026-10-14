@@ -4,7 +4,7 @@
  * index-required (--refresh indexes first); only --record writes, through recordReview(). A verdict
  * is not a process error: the exit code follows it only with --fail-on (or --strict).
  */
-import { decisionAuthorityLabel, provenanceLabel, recordReview, renderGapQuestions, reviewLlmMetric, type ReviewResult, type Verdict } from "@duo-director/director";
+import { decisionAuthorityLabel, provenanceLabel, recordReview, renderGapQuestions, reviewLlmMetric, unscopedConstraintIds, type ReviewResult, type Verdict } from "@duo-director/director";
 import { normalizeRepoPath, type RepoPath } from "@duo-director/core";
 import { indexRepository } from "@duo-director/graph";
 import { diffEnd, projectReview, withGraphWriter } from "@duo-director/integration";
@@ -29,7 +29,7 @@ export interface ReviewOptions {
 const SEVERITY: Readonly<Record<Verdict, number>> = { PASS: 0, WARN: 1, ASK: 2, BLOCK: 3 };
 const VERDICT_EXIT: Readonly<Record<Verdict, number>> = { PASS: EXIT.OK, WARN: EXIT.WARN, ASK: EXIT.ASK, BLOCK: EXIT.BLOCK };
 
-function renderReview(env: Env, r: ReviewResult): string[] {
+function renderReview(env: Env, r: ReviewResult, unscoped: readonly string[] = []): string[] {
   const L = env.locale;
   if (r.status === "index-required") return [t(L, "index.required", { status: r.freshness.status })];
   const out = [t(L, "review.head", { verdict: r.verdict ?? "-", claims: r.claims.length, files: r.diff?.files.length ?? 0, llm: r.metrics.llmCalls })];
@@ -56,7 +56,11 @@ function renderReview(env: Env, r: ReviewResult): string[] {
       out.push(...q.additionalQuestions.map((a) => `  ? ${a.question}`), ...q.notes.map((n) => `  - ${n.note}`));
     }
   }
-  if (r.limitations.length > 0) out.push(t(L, "review.limitations"), ...r.limitations.map((l) => `  ${l.code}`));
+  if (r.limitations.length > 0) {
+    out.push(t(L, "review.limitations"), ...r.limitations.map((l) => `  ${l.code}`));
+    // #14: the one limitation a PASS reader must not miss: recorded constraints were not checked.
+    if (unscoped.length > 0 && r.limitations.some((l) => l.code === "constraints-unscoped")) out.push(`    ${t(L, "review.constraints-unchecked", { ids: unscoped.join(", ") })}`);
+  }
   const a = r.semanticAssist;
   if (a.status !== "not-requested") {
     const who = a.provider === undefined ? "" : ` · ${a.provider.id}${a.provider.model === undefined ? "" : ` ${a.provider.model}`}`;
@@ -72,6 +76,7 @@ function renderReview(env: Env, r: ReviewResult): string[] {
 export async function reviewCommand(env: Env, options: ReviewOptions): Promise<Outcome> {
   const project = requireProject(env, "review");
   if (project.value === undefined) return project.outcome as Outcome;
+  const unscoped = unscopedConstraintIds(project.value.truth);
   if (options.staged && (options.from !== undefined || options.to !== undefined)) return usage("review", "--staged cannot be combined with --from/--to");
   const from = options.from === undefined ? "HEAD" as const : diffEnd(options.from);
   const to = options.staged ? "INDEX" as const : options.to === undefined ? "WORKTREE" as const : diffEnd(options.to);
@@ -100,7 +105,7 @@ export async function reviewCommand(env: Env, options: ReviewOptions): Promise<O
     if (r.status === "index-required") {
       return { command: "review", exitCode: EXIT.ACTION_REQUIRED, result: r, meta: { performance: op.performance }, diagnostics: [], human: renderReview(env, r), metric };
     }
-    const human = renderReview(env, r);
+    const human = renderReview(env, r, unscoped);
     let record: unknown = undefined;
     if (options.record) {
       const rec = await recordReview(r, { root: env.root, actor: await humanActor(env.root), clock: () => env.io.now() });
