@@ -180,6 +180,9 @@ export async function initCommand(env: Env, options: InitOptions): Promise<Outco
     apply = applied.value;
     steps.truth = { status: "ok", detail: `${applied.value.created.length} files` };
     if (applied.value.openQuestions.length > 0) human.push(t(env.locale, "init.open", { list: applied.value.openQuestions.join(", ") }));
+    // #14: constraints from init have no match scope; say what they are before the user relies on them.
+    const recorded = new Set(answers.flatMap((a) => (a.question === "critical_constraints" ? a.statements.map((s) => s.trim()).filter((s) => s !== "") : [])));
+    if (recorded.size > 0) human.push(t(env.locale, "init.constraints-unchecked", { n: recorded.size }));
   }
   report("truth");
 

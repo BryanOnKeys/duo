@@ -65,6 +65,9 @@ export function renderDoctor(L: Locale, d: DoctorPayload): string[] {
       out.push("  " + pad(status(c)) + checkLine(L, c));
       const indent = "  " + " ".repeat(width);
       if (c.id === "analysis.coverage" && c.status === "info") out.push(indent + t(L, "doctor.analysis.legend"));
+      // #14: a note only; the check stays ok and the exit code does not change.
+      const unscoped = c.id === "truth.project" && Array.isArray(c.facts.unscopedConstraints) ? (c.facts.unscopedConstraints as string[]) : [];
+      if (unscoped.length > 0) out.push(indent + t(L, "doctor.truth.constraints-unchecked", { ids: unscoped.join(", ") }));
       if (c.group === "agents" && c.status === "ok" && typeof c.facts.humanStep === "string") out.push(indent + t(L, ("doctor.agent.human." + c.facts.humanStep) as MessageKey));
       for (const a of c.actions) out.push(indent + "→ " + actionLine(L, a));
     }

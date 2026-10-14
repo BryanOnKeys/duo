@@ -7,7 +7,7 @@ import { operationFailure, type Env } from "./shared.js";
 
 interface StatusPayload {
   project: { name: string; vision: string; currentMilestone: string | null };
-  truth: { requirements: number; decisions: number; constraints: number; declaredGaps: number; errors?: { code: string; message: string; path?: string; line?: number }[] };
+  truth: { requirements: number; decisions: number; constraints: number; declaredGaps: number; unscopedConstraints?: string[]; errors?: { code: string; message: string; path?: string; line?: number }[] };
   index: { status: string; fullRebuildReason: string | null; changes: { files: number; analysisStale: number; modulesToResolve: number; callsMaybeRecomputed: number } } | null;
   baseline: { status: string; headOid?: string; dirtyAtAdoption?: boolean; findings?: number } | null;
   analysis: { languages: { language: string; files: number; level: string }[]; fileOnly: { files: number; extensions: { extension: string; files: number }[] } } | null;
@@ -34,6 +34,8 @@ export async function statusCommand(env: Env): Promise<Outcome> {
   const human = [
     t(L, "status.project", { name: s.project.name, goal: s.project.vision, milestone: s.project.currentMilestone ?? "-" }),
     t(L, "status.truth", { requirements: s.truth.requirements, decisions: s.truth.decisions, constraints: s.truth.constraints, gaps: s.truth.declaredGaps }),
+    // #14: a recorded constraint is not a checked rule; name the ones context and review never use.
+    ...((s.truth.unscopedConstraints ?? []).length === 0 ? [] : [t(L, "status.constraints-unchecked", { ids: (s.truth.unscopedConstraints ?? []).join(", ") })]),
     // T40 (N1): what the loader left out, so a lower Decision count is never silent.
     ...((s.truth.errors ?? []).length === 0 ? [] : [t(L, "status.truth-errors", { n: s.truth.errors?.length ?? 0 }),
       ...(s.truth.errors ?? []).map((e) => `  ${e.code} ${e.path ?? ""}${e.line === undefined ? "" : `:${e.line}`} ${e.message}`)]),

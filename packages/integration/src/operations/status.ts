@@ -1,5 +1,5 @@
 /** duo status (CLI status, MCP duo_get_status): write 0. */
-import { getAdoptionBaselineStatus } from "@duo-director/director";
+import { getAdoptionBaselineStatus, unscopedConstraintIds } from "@duo-director/director";
 import { listDecisionProposals, truthAuthorityErrors } from "@duo-director/core";
 import { inspectIndex } from "@duo-director/graph";
 import { errorsOf, guarded, llmPoolOf, project, withGraphReader, withRegistry, type Operation, type OperationOptions, type Failure } from "./common.js";
@@ -28,6 +28,8 @@ export function projectStatus(root: string, options: OperationOptions = {}): Pro
         truth: {
           requirements: truth.requirements.length, decisions: truth.decisions.length, constraints: truth.constraints.length, declaredGaps: truth.gaps.length,
           // T40 (additive): loader errors that make review, context and Decision confirm refuse this Truth. Empty when Truth loaded completely.
+          // #14 (additive): confirmed Constraints without a match scope; context and review never use them.
+          unscopedConstraints: unscopedConstraintIds(truth),
           errors: truthErrors.map((d) => ({ code: d.code, message: d.message, ...(d.source === undefined ? {} : { path: d.source.path, ...(d.source.startLine === undefined ? {} : { line: d.source.startLine }) }) })),
         },
         index: i === undefined ? null : {
