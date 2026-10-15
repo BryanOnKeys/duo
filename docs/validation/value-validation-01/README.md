@@ -4,7 +4,7 @@ DUO를 기존 작업 흐름에 더했을 때, 더해지는 시간·토큰·사�
 
 ```yaml
 round: value-validation-01
-protocol_version: 1
+protocol_version: 1.1      # 1.1: 실행 전 산술 정정만(§14). 조건·지표·판정 규칙은 1과 같다
 status: protocol-ready      # protocol-ready | running | analyzing | closed
 duo_version: 0.3.3          # 공개 npm stable, 모든 C run에 같은 package
 part1_detection: measured   # 결정적 탐지 테스트(유료 호출 없음), detection-results-01.md
@@ -77,7 +77,7 @@ part4_human_steps: not-run  # 사람 단계의 시간 측정(설치, 승인, 검
 - 시간 제한: 세션당 20분(Part 3은 10분). 초과는 `timeout`으로 남기고 다시 돌리지 않는다.
 - 독립성: 모든 run은 조건 template의 새 복사본에서 시작한다. 이전 run의 파일, index, 대화가 남지 않는다.
 - 순서: seed 81로 작업 순서를 섞고, 작업마다 A/B/C 실행 순서를 여섯 가지 순서에 고르게 돌린다([agent.mjs](../../../bench/value-validation/agent.mjs) `schedule`). 일정은 실행 전에 `schedule.json`으로 남긴다.
-- 반복: 작업 7개 × 조건 3개 × 3회 = 63 run(T6은 run마다 두 세션이므로 Codex 세션은 70개).
+- 반복: 작업 7개 × 조건 3개 × 3회 = 63 run(T6은 run마다 두 세션이므로 Codex 세션은 63 + 9 = 72개).
 - 재실행: 기반 설비 실패(Codex 서비스 오류, 네트워크 단절)만 같은 run ID로 다시 돌리고, 그 사실과 원래 log를 남긴다. 결과가 마음에 들지 않아서 다시 돌리지 않는다.
 - 제품 고정: 실험 동안 DUO와 fixture는 바꾸지 않는다. 결함을 찾으면 Issue로 기록하고 이 round의 결과는 0.3.3 기준으로 남긴다.
 
@@ -183,9 +183,9 @@ harness가 잴 수 없는 사람의 시간은 실행하는 사람이 stopwatch�
 
 | 항목 | Part 2 에이전트 작업 | Part 3 발견률 |
 |---|---|---|
-| Codex 세션 | 70 | 20 |
+| Codex 세션 | 72 | 20 |
 | 세션당 입력 토큰(추정) | 18만~48만(구현 작업은 계획 세션의 1.5~4배로 가정) | 약 12만 |
-| 전체 입력 토큰(추정) | 약 1,300만~3,400만(대부분 캐시) | 약 240만 |
+| 전체 입력 토큰(추정) | 약 1,300만~3,500만(대부분 캐시) | 약 240만 |
 | 전체 출력 토큰(추정) | 약 30만~80만 | 약 5.5만 |
 | 기계 시간 | 약 3~6시간(순차 실행) | 약 20~30분 |
 | 사람 시간 | 약 1~2시간(T5 판정, 사람 검토 run, 남은 위반 수정, 승인 단계) | 결과 확인 10분 |
@@ -211,4 +211,11 @@ harness가 잴 수 없는 사람의 시간은 실행하는 사람이 stopwatch�
 - 모델과 Codex version에 따라 결과가 바뀐다. 결과는 기록한 모델에만 해당한다.
 - 같은 사람이 실행하고 검토한다.
 - 사람 시간은 한 사람이 잰 값이다.
+
+## 14. 개정 기록
+
+| 버전 | 시점 | 바뀐 것 | 바뀌지 않은 것 |
+|---|---|---|---|
+| 1 | T81 | 최초 사전 등록 | |
+| 1.1 | T82, Part 2·3 실행 전 | Codex 세션 수 계산을 70에서 72로 정정했다. T6 run 9개(조건 3 × 3회)가 세션을 하나씩 더 열기 때문이다([agent.mjs](../../../bench/value-validation/agent.mjs)의 `handoff`). 같은 이유로 Part 2 전체 입력 토큰 추정 상한을 3,400만에서 3,500만으로 고쳤다. | 조건, 작업, 지표, 판정 규칙, seed, Part 1 실측 결과. 결과를 보기 전의 산술 정정이라 새 Human Decision은 필요 없다. |
 
