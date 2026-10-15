@@ -47,6 +47,9 @@ GitHub 계정과 역할의 연결은 아직 확인 중이다. 활동 내역으�
 | #33 | [AGT-01] 세션·agent 간 Decision 연속성 | AI-4 | P2 | Product Value Validation |
 | #34 | [AGT-02] 동시 agent 실행 일관성 | AI-4 | P1 | v0.4.0 |
 | #35 | [EV-02] External Validation 02 | AI-4(+AI-1) | P1 | External Validation 02 |
+| #37 | [CI-01] Windows CI의 project-local npm 설치 간헐적 600초 시간 초과 | FS-2(+FS-1) | P1 | 없음(모든 PR의 Windows CI에 영향) |
+
+#37은 문서만 바꾼 PR도 Windows CI에서 막을 수 있다. 해결 전에는 이 테스트 하나만 실패한 경우 maintainer가 로그를 확인하고 재실행한다. 테스트를 건너뛰게 하지 않는다.
 
 ## 4. 같이 만지는 곳(병렬 작업 충돌)
 
