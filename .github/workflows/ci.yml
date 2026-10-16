@@ -52,8 +52,21 @@ jobs:
       - name: smoke test built CLI
         run: node apps/cli/dist/main.js --version
       # T17.1: npm pack is the artifact oracle; clean global and project-local installs outside the workspace.
+      # #37: read-only facts about the Windows runner (antivirus state, drives) next to the install timings.
+      - name: Windows runner diagnostics (#37)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try { Get-MpComputerStatus | Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, OnAccessProtectionEnabled | Format-List } catch { "Get-MpComputerStatus unavailable: $($_.Exception.Message)" }
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, Root, Used, Free
+          "default TEMP=$env:TEMP  runner.temp=$env:RUNNER_TEMP"
       - name: distribution E2E (packed @duo-director/cli)
         run: pnpm test:dist
+        # #37 experiment: the temporary installs and projects go to the runner's work drive instead of the default
+        # C: temp on Windows (TMP/TEMP only affect Windows; os.tmpdir() reads TMPDIR elsewhere). Still outside the checkout.
+        env:
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
       # TASK-020: CLI/MCP/install journeys and RC-only checks against the installed release candidate; C209 init repetitions.
       - name: release conformance (installed release candidate)
         run: pnpm test:conformance
