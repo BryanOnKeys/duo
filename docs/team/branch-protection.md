@@ -1,6 +1,6 @@
 # Branch 보호 설정(T83 제안, T84 검증)
 
-`main`과 `next`에는 보호 규칙이 없었다. write 권한을 가진 팀원 누구나 두 branch에 직접 push하거나 force push할 수 있고, `v*` tag도 만들 수 있었다. 이 문서는 GitHub repository ruleset 다섯 개를 정의한다. 실제 적용 상태는 GitHub Settings → Rules에서 확인한다.
+`main`과 `next`에는 보호 규칙이 없었다. write 권한을 가진 팀원 누구나 두 branch에 직접 push하거나 force push할 수 있고, `v*` tag도 만들 수 있었다. 이 문서는 GitHub repository ruleset 다섯 개를 정의한다. 2026-10-16(T84)에 적용했다(§7). 현재 상태는 GitHub Settings → Rules에서 확인한다.
 
 ## 1. 원칙
 
@@ -108,4 +108,18 @@ GitHub rule insights(`rulesets/rule-suites`)에 각 시도가 `pass`·`bypass`·
 ```
 
 적용: `gh api -X POST repos/kanghyunsoon/duo/rulesets --input <file>.json`. 해제: `gh api -X DELETE repos/kanghyunsoon/duo/rulesets/<id>`.
+
+## 7. 적용 기록
+
+2026-10-16(T84), #37 Windows 5회 연속 통과를 확인한 뒤 위 정의 그대로 적용했다.
+
+| Ruleset | ID |
+|---|---|
+| `next-integration` | 25224696 |
+| `main-stable` | 25224698 |
+| `branches-immutable` | 25224700 |
+| `release-tags-create` | 25224701 |
+| `release-tags-immutable` | 25224702 |
+
+적용 직후 `rules/branches/next`는 `pull_request`·`required_status_checks`·`deletion`·`non_fast_forward`, `rules/branches/main`은 `update`·`deletion`·`non_fast_forward`를 보고했다. 열린 PR(#24, #36, #38)은 `REVIEW_REQUIRED`로 막혔다. `main`·`next`·`v*` tag는 바뀌지 않았고, 저장소 merge 방식과 `delete_branch_on_merge: false`도 그대로다.
 
