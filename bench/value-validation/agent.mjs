@@ -112,17 +112,29 @@ function contextTokens(repo) {
   return fs.readFileSync(f, "utf8").split(/\r?\n/u).flatMap((l) => { try { const m = JSON.parse(l); return typeof m.contextTokens === "number" ? [m.contextTokens] : []; } catch { return []; } }).reduce((p, q) => p + q, 0);
 }
 
+/** The protocol's duo_version: condition C uses this public package in both places DUO runs (templates and the agent's PATH). */
+const DUO_VERSION = "0.3.3";
+function checkDuoctl(env) {
+  const v = (r) => (r.status === 0 ? String(r.stdout).trim() : "failed: " + String(r.stderr || r.error?.message || "").trim().split("\n")[0]);
+  const script = opts.duoctl === undefined ? "missing --duoctl" : v(spawnSync(process.execPath, [opts.duoctl, "--version"], { encoding: "utf8", windowsHide: true }));
+  const onPath = v(spawnSync("duoctl", ["--version"], { env, encoding: "utf8", windowsHide: true, shell: process.platform === "win32" }));
+  const want = "duoctl " + DUO_VERSION;
+  if (script !== want || onPath !== want) throw new Error("condition C needs @duo-director/cli@" + DUO_VERSION + ": --duoctl reports \"" + script + "\", duoctl on the agent's PATH reports \"" + onPath + "\"");
+  return { script, onPath };
+}
+
 async function main() {
   fs.mkdirSync(out, { recursive: true });
   if (opts.selftest) return selftest();
   if (!opts.dryRun && (opts.model === undefined || !flag("--i-understand-this-uses-codex"))) throw new Error("real runs need --model <model> and --i-understand-this-uses-codex (they use the runner's Codex quota); use --dry-run to check the setup");
+  const env = { ...process.env, PATH: (opts.duoctlBin ? opts.duoctlBin + path.delimiter : "") + process.env.PATH };
+  const duoctl = opts.conditions.includes("C") ? checkDuoctl(env) : null;
   const info = await templates();
   const plan = schedule(opts);
-  fs.writeFileSync(path.join(out, "schedule.json"), JSON.stringify({ seed: opts.seed, model: opts.model ?? null, timeoutMin: opts.timeoutMin, runs: plan }, null, 2));
+  fs.writeFileSync(path.join(out, "schedule.json"), JSON.stringify({ seed: opts.seed, model: opts.model ?? null, timeoutMin: opts.timeoutMin, duoctl, runs: plan }, null, 2));
   const resultsFile = path.join(out, "runs.json");
   const results = fs.existsSync(resultsFile) ? JSON.parse(fs.readFileSync(resultsFile, "utf8")) : { format: "duo.value-validation-agents/1", templates: info, runs: [] };
   const done = new Set(results.runs.map((r) => r.id));
-  const env = { ...process.env, PATH: (opts.duoctlBin ? opts.duoctlBin + path.delimiter : "") + process.env.PATH };
   for (const run of plan) {
     if (done.has(run.id)) continue;
     const task = TASKS.find((t) => t.id === run.task);
