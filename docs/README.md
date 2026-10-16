@@ -78,6 +78,7 @@ DUO는 SDD(Specification-Driven Development)로 개발한다. 구현은 이 문�
 | [conflicts.md](conflicts.md) | 원본 충돌, Human 결정 기록(H-*), 미결 사항 |
 | [team/README.md](team/README.md) | 6인 팀 온보딩과 협업 규칙(T82): 0.3.3에 있는 것과 계획인 것, 개발 환경, Issue → Draft PR → 작성자 아닌 review·3 OS CI → maintainer merge, PR에 쓸 것, maintainer 승인이 필요한 변경, AI가 쓴 코드의 책임, 첫 기여 |
 | [team/roles-and-plan.md](team/roles-and-plan.md) | 팀 역할(FS-1·FS-2·AI-1~4), 첫 작업과 후속 작업, Issue 분담표(#2~#8, #25~#35), 병렬 작업 충돌 지점, 첫 2주 일정, branch ruleset·CODEOWNERS 제안(적용하지 않음) |
+| [team/branch-protection.md](team/branch-protection.md) | branch·tag ruleset 제안(T83, 적용하지 않음): main은 maintainer fast-forward만, next는 PR·작성자 아닌 승인 1·3 OS CI, v* tag는 maintainer만, 기존 release 절차 대조표, 운영 규칙과 남은 위험(#37, strict check, code owner) |
 | [adr/](adr/README.md) | ADR-001~014 |
 | [tasks/TASKS.md](tasks/TASKS.md) | TASK-000~020(TASK-012A/012B 포함), 의존성, E2E 매핑 |
 

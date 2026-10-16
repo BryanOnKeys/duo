@@ -4,16 +4,20 @@
 
 ## 1. 역할
 
-GitHub 계정과 역할의 연결은 아직 확인 중이다. 활동 내역으로 추정하지 않는다. 확인 전까지 Assignee는 FS-1만 실제로 지정하고, 나머지 Issue는 담당 역할만 표시한 채 Unassigned로 둔다. 팀원이 Issue에 댓글로 맡겠다고 하면 maintainer가 지정한다.
+풀스택 2명(FS-1, FS-2)과 AI 4명(AI-1~AI-4)으로 운영한다. FS-1은 kanghyunsoon으로 확정했다(T83). 나머지 다섯 명은 각자 맡을 역할과 첫 Issue를 직접 고른다. maintainer가 GitHub 활동 내역으로 역할을 추정해 배정하지 않는다.
 
-| 역할 | 영역 | GitHub 계정 |
+- 고르는 방법: 아래 §2 표에서 역할과 첫 Issue를 고르고, 그 Issue에 "AI-2로 맡겠습니다"처럼 역할과 접근 방법을 댓글로 남긴다.
+- Assignee: 댓글을 확인한 maintainer가 지정한다. 댓글이 없는 Issue는 Unassigned로 둔다.
+- 같은 역할을 두 사람이 고르면 Issue 댓글에서 나눈다. 역할은 첫 작업의 출발점일 뿐이고, 다른 영역 Issue에도 기여할 수 있다.
+
+| 역할 | 영역 | 담당 |
 |---|---|---|
 | FS-1 | PM · Maintainer: 우선순위, Decision authority, release, merge | kanghyunsoon |
-| FS-2 | 풀스택 · UX · DX: 설치, 온보딩, CLI·UI 사용성 | 확인 필요 |
-| AI-1 | AI Evaluation · Benchmark: 측정 방법, A/B/C 실험 | 확인 필요 |
-| AI-2 | Decision Compliance · Reliability: review 정확도, 오탐·미탐 | 확인 필요 |
-| AI-3 | Agent Integration · MCP: Codex·Claude Code 연동, MCP server | 확인 필요 |
-| AI-4 | Multi-Agent Workflow: 세션·agent 간 연속성, 동시 실행, 외부 검증 운영 | 확인 필요 |
+| FS-2 | 풀스택 · UX · DX: 설치, 온보딩, CLI·UI 사용성 | 본인 선택(Issue 댓글) |
+| AI-1 | AI Evaluation · Benchmark: 측정 방법, A/B/C 실험 | 본인 선택(Issue 댓글) |
+| AI-2 | Decision Compliance · Reliability: review 정확도, 오탐·미탐 | 본인 선택(Issue 댓글) |
+| AI-3 | Agent Integration · MCP: Codex·Claude Code 연동, MCP server | 본인 선택(Issue 댓글) |
+| AI-4 | Multi-Agent Workflow: 세션·agent 간 연속성, 동시 실행, 외부 검증 운영 | 본인 선택(Issue 댓글) |
 
 ## 2. 첫 작업과 후속 작업
 
@@ -65,7 +69,7 @@ GitHub 계정과 역할의 연결은 아직 확인 중이다. 활동 내역으�
 
 | 기간 | FS-1 | FS-2 | AI-1 | AI-2 | AI-3 | AI-4 |
 |---|---|---|---|---|---|---|
-| 10/19~10/20 | 계정·역할 확인, 온보딩 | 환경 구성, #27 fixture 설계 | 환경 구성, PR #24 읽기 | 환경 구성, #30 재현 | 환경 구성, #32 script 골격 | 환경 구성, #34 시나리오 |
+| 10/19~10/20 | 역할 선택 댓글 확인·Assignee 지정, #37 Draft PR 검토 | 역할·Issue 선택, 환경 구성, #27 fixture 설계 | 역할·Issue 선택, PR #24 review | 역할·Issue 선택, #30 재현 | 역할·Issue 선택, #32 script 골격 | 역할·Issue 선택, #34 시나리오 |
 | 10/21~10/23 | #25 선택지 비교 | #27 Draft PR | #28 측정표 | #30 원인 추적 | #32 측정 | #34 stress script |
 | 10/26~10/28 | #25 결정 제안, PR #24 판단 | #27 review 반영, #3 설계 | #29 dry run | #30 분류·후속 Issue | #31 절차 | #34 결과표, #33 시나리오 |
 | 10/29~10/30 | 2주 회고, 다음 우선순위 | #27 merge 목표 | #29 pilot 승인 요청 | #7·#5 접근안 | #31 결과, #8 측정 승인 요청 | #35 자료 준비 |
@@ -74,11 +78,9 @@ GitHub 계정과 역할의 연결은 아직 확인 중이다. 활동 내역으�
 
 ## 6. 권한과 저장소 설정 제안(적용하지 않음)
 
-T82 시점 상태: owner `kanghyunsoon`만 admin, 다른 collaborator는 write, 한 명은 초대 수락 대기. `main`·`next` branch protection과 ruleset 없음, CODEOWNERS 없음. 아래는 maintainer가 판단할 제안이다.
+T83 시점 상태: owner `kanghyunsoon`만 admin, 다른 collaborator는 write, 한 명은 초대 수락 대기. `main`·`next` branch protection과 ruleset 없음, CODEOWNERS 없음. Ruleset 제안은 [branch-protection.md](branch-protection.md)에 있다. 적용은 maintainer의 별도 승인 뒤에 한다.
 
-Branch ruleset(`main`, `next`): PR 필수, 작성자가 아닌 승인 1개, required status check `verify (ubuntu-latest, node 24)`·`verify (windows-latest, node 24)`·`verify (macos-latest, node 24)`, force push·삭제 금지, squash merge만. `main`은 maintainer만 merge.
-
-CODEOWNERS 초안:
+CODEOWNERS 초안(ruleset의 code owner review와 함께 켤 때만 의미가 있다):
 
 ```text
 # Decision authority, Project Truth, release: maintainer review required
