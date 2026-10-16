@@ -49,7 +49,10 @@ async function spawnConfigured(entry: { command: string; args: readonly string[]
 beforeAll(() => {
   pack = packReport();
   prefix = tmp("duo-prefix-");
+  const t = performance.now();
   const r = npm(["install", "-g", "--prefix", prefix, pack.tarball, "--no-audit", "--no-fund", "--loglevel=error"], prefix, isolatedEnv([]));
+  // #37: the global install of the same tarball, to compare with the project-local install phases.
+  console.log(`global install (ms): ${Math.round(performance.now() - t)}`);
   if (r.status !== 0) throw new Error(`npm install -g failed: ${r.stderr}`);
   bin = IS_WIN ? prefix : path.join(prefix, "bin");
   pkgDir = path.join(prefix, ...(IS_WIN ? [] : ["lib"]), "node_modules", "@duo-director", "cli");
