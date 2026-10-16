@@ -78,7 +78,7 @@
 
 ## 6. 권한과 저장소 설정 제안(적용하지 않음)
 
-T83 시점 상태: owner `kanghyunsoon`만 admin, 다른 collaborator는 write, 한 명은 초대 수락 대기. `main`·`next` branch protection과 ruleset 없음, CODEOWNERS 없음. Ruleset 제안은 [branch-protection.md](branch-protection.md)에 있다. 적용은 maintainer의 별도 승인 뒤에 한다.
+권한 상태: owner `kanghyunsoon`만 admin, 다른 collaborator는 write, 한 명은 초대 수락 대기. CODEOWNERS 없음. Branch·tag ruleset 정의와 사전 검증, release 절차 대조는 [branch-protection.md](branch-protection.md)에 있다.
 
 CODEOWNERS 초안(ruleset의 code owner review와 함께 켤 때만 의미가 있다):
 
