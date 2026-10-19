@@ -4,6 +4,11 @@ name: Weekly community snapshot (read-only)
 # It reads public data only: no checkout, no third-party actions, no pull request trigger,
 # and the token is read-only. It does not measure traffic, npm downloads or external
 # contributors; docs/community/METRICS.md explains how those are counted by hand.
+#
+# Limits: GitHub runs scheduled workflows only from the default branch (main), so the
+# weekly run starts after this file reaches main in a release. GitHub disables schedules in
+# public repositories after 60 days without activity. Job summaries expire with the run logs,
+# so this is not a long-term history.
 
 on:
   schedule:
