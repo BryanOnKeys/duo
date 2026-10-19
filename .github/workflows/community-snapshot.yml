@@ -1,0 +1,37 @@
+name: Weekly community snapshot (read-only)
+
+# Records public repository counts in the run's job summary once a week.
+# It reads public data only: no checkout, no third-party actions, no pull request trigger,
+# and the token is read-only. It does not measure traffic, npm downloads or external
+# contributors; docs/community/METRICS.md explains how those are counted by hand.
+
+on:
+  schedule:
+    - cron: '18 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record public repository counts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r stars forks open_items < <(gh api "repos/${GH_REPOSITORY}" --jq '"\(.stargazers_count) \(.forks_count) \(.open_issues_count)"')
+          {
+            echo '## DUO community snapshot'
+            echo ''
+            echo "- Recorded (UTC): $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "- Stars: ${stars}"
+            echo "- Forks: ${forks}"
+            echo "- Open issues and pull requests (GitHub's combined counter): ${open_items}"
+            echo '- Not measured here: traffic, unique visitors, npm downloads, external contributors.'
+          } >> "$GITHUB_STEP_SUMMARY"
