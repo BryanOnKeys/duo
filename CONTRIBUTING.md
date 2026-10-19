@@ -6,7 +6,7 @@ Thank you for helping. DUO is a small project with one maintainer, so small and 
 
 - Search the [existing issues](https://github.com/kanghyunsoon/duo/issues) first. For a bug fix or a feature, open an issue (or comment on one) before you write code so we can agree on the approach.
 - Prefer small pull requests that solve one problem.
-- Issues labeled `good first issue` are a good place to start.
+- Issues labeled `good first issue` are a good place to start. If you have not contributed before, [docs/community/START_HERE.md](docs/community/START_HERE.md) ([한국어](docs/community/START_HERE.ko.md)) walks through the fork, the branch from `next`, the checks and the pull request.
 - Questions and ideas are welcome in [Discussions](https://github.com/kanghyunsoon/duo/discussions).
 - **Do not report security vulnerabilities in public issues, discussions or pull requests.** Use GitHub Private Vulnerability Reporting as described in [SECURITY.md](SECURITY.md).
 

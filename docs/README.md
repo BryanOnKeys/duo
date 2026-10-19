@@ -23,6 +23,10 @@ DUO는 SDD(Specification-Driven Development)로 개발한다. 구현은 이 문�
 | [performance-benchmark.md](performance-benchmark.md) | TASK-019 benchmark 방법, 기준 환경, index·Context·Review·MCP·UI 측정, C145 원인, 적용한 최적화, T23 real-world baseline(고정 SHA 5개 저장소, A/B 비교, 3 OS 수동 workflow) |
 | [benchmarks/decision-compliance-01.md](benchmarks/decision-compliance-01.md) | Decision Compliance Benchmark 1 (Legacy + New Violation, T31, H-64): 고정 TypeScript fixture에서 published DUO 0.2.0, 한 규칙용 DIY gate, Codex review를 축별로 비교(종합 점수 없음), raw evidence, 재현 방법, 한계, 반증 기준. performance benchmark와 별개 |
 | [benchmarks/decision-compliance-02.md](benchmarks/decision-compliance-02.md) | Decision Compliance Benchmark 2 (Adoption Provenance + Supersession, T32, H-64): adoption 뒤 debt(diff base ≠ adoption)와 D-001 → D-002 supersede timeline에서 published DUO 0.2.0, DIY-0/1/2, Codex + 문서를 축별 비교, 반증 결과, product-thesis checkpoint(C) |
+| [examples/decision-review-0.3.3.md](examples/decision-review-0.3.3.md) | 공개 0.3.3으로 새 저장소에서 검증한 walkthrough(T88, 2026-10-19 Windows): init·install codex·doctor, agent proposal, 사람 confirm, 금지 import BLOCK(exit 4)과 수정 뒤 PASS(exit 0), launcher 버전 확인(#40), 한계 |
+| [community/START_HERE.md](community/START_HERE.md) · [한국어](community/START_HERE.ko.md) | 외부 기여자 첫 기여 안내(T88): 작업 고르기, fork·upstream·`next` 기준 branch, 검사, PR 절차, 영역별 처음 하기 좋은 기여 |
+| [community/METRICS.md](community/METRICS.md) | 커뮤니티 지표 규칙(T88): 2026-10-19 기준값, 주간 기록 양식, 유입과 실제 기여 구분 |
+| [community/RELEASE_AND_PROMOTION.md](community/RELEASE_AND_PROMOTION.md) · [community/DEMO_RECORDING.md](community/DEMO_RECORDING.md) | 외부 소개 채널별 조건과 승인 절차(게시 전), 45초 terminal demo 녹화 계획(T88) |
 | [release/checklist.md](release/checklist.md) | release 명령, version별 release 기록(0.2.2, 0.2.1, 0.2.0, 0.1.2, 0.1.1, 0.1.0: 준비 항목과 최종 상태), publish 순서, limitation |
 | [release/notes-0.1.1.md](release/notes-0.1.1.md) | 0.1.1 release notes |
 | [release/notes-0.1.2.md](release/notes-0.1.2.md) | 0.1.2 release notes |

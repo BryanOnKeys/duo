@@ -10,6 +10,8 @@
 
 [English](README.md) · [최신 release](https://github.com/kanghyunsoon/duo/releases/latest) · [npm](https://www.npmjs.com/package/@duo-director/cli)
 
+처음이라면: [빠른 시작](#빠른-시작) · [검증한 0.3.3 walkthrough](docs/examples/decision-review-0.3.3.md)(영문) · [첫 기여 안내](docs/community/START_HERE.ko.md) · [Discussions](https://github.com/kanghyunsoon/duo/discussions)
+
 ## AGENTS.md, CLAUDE.md, 저장소 규칙만으로는 왜 부족한가요?
 
 지시 파일과 규칙은 Agent에게 무엇을 해야 하는지 알려 줍니다. 관례를 적어 두기에 좋은 곳이고, Agent를 연결하면 DUO도 그 파일에 짧은 안내 블록을 추가합니다.
@@ -29,6 +31,8 @@ DUO는 변경이 일어난 뒤를 봅니다. 사람이 확정한 Requirement와 
 ## Decision compliance 예시
 
 `duoctl` 0.3.0-rc.1과 Codex로 파일 여덟 개짜리 TypeScript 저장소에서 기록했습니다. 팀은 UI와 service 코드가 legacy database module을 더 이상 import하지 않기를 원합니다. 아래 명령과 출력은 고치지 않은 그대로입니다.
+
+같은 검사를 공개 0.3.3으로 새 저장소에서 단계별로 재현한 기록은 [0.3.3 walkthrough](docs/examples/decision-review-0.3.3.md)(영문)에 있습니다.
 
 **1. DUO를 도입하고 Codex를 연결합니다.**
 
@@ -112,6 +116,7 @@ duoctl doctor
   - Codex는 trust한 project에서만 `.codex/config.toml`을 읽습니다. Codex를 처음 열 때 나오는 trust 질문에서 이 폴더를 trust하거나, `~/.codex/config.toml`에 `[projects."/path/to/project"]`와 `trust_level = "trusted"`를 추가하세요. 그다음 Codex의 `/mcp`에 `duo-director`가 보입니다.
   - Claude Code는 `.mcp.json`의 서버를 쓰기 전에 승인을 묻습니다. project에서 `claude`를 실행해 workspace trust 대화상자를 수락하고 `duo-director`를 승인하세요. 승인 전에는 `claude mcp get duo-director`가 `Pending approval`을 보이고, `claude mcp reset-project-choices`로 다시 물을 수 있습니다.
 - `duoctl doctor`는 Git, Project Truth, index, 언어별 분석 수준, 연결한 Agent, 선택 LLM 설정을 확인하고 다음 할 일을 1~3개 보여 줍니다. 읽기만 합니다.
+- Agent 설정은 PATH에 있는 `duoctl`을 실행합니다. 예전 전역 설치가 남아 있다면 project 폴더의 일반 터미널에서 `duoctl --version`을 확인하세요. 버전이 달라도 install 검증은 아직 경고하지 않습니다([#40](https://github.com/kanghyunsoon/duo/issues/40)).
 
 로컬 UI(`duoctl ui`)와 LLM 보조는 선택 사항입니다.
 
@@ -256,6 +261,8 @@ npm install -g .dist/duo-director-cli-<version>.tgz
 ## 기여
 
 버그 신고, 사용 중 불편함, 작은 수정을 환영합니다. [CONTRIBUTING.md](CONTRIBUTING.md)(영문)와 [열린 Issue](https://github.com/kanghyunsoon/duo/issues)에서 시작해 주세요. `good first issue` label이 붙은 Issue가 첫 기여에 알맞습니다. 일상적인 Agent 사용에서 DUO에 신경 쓸 일을 줄이는 작업은 [#2](https://github.com/kanghyunsoon/duo/issues/2)에서 추적합니다.
+
+처음 기여한다면 [첫 기여 안내](docs/community/START_HERE.ko.md)에서 fork, `next` 기준 branch, 실행할 검사, pull request 여는 방법을 볼 수 있습니다.
 
 ## License와 보안
 

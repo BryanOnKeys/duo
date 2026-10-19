@@ -10,6 +10,8 @@ Keep coding agents aligned with human-confirmed engineering decisions. You confi
 
 [한국어](README.ko.md) · [Latest release](https://github.com/kanghyunsoon/duo/releases/latest) · [npm](https://www.npmjs.com/package/@duo-director/cli)
 
+New here? [Quick start](#quick-start) · [Verified 0.3.3 walkthrough](docs/examples/decision-review-0.3.3.md) · [Your first contribution](docs/community/START_HERE.md) · [Discussions](https://github.com/kanghyunsoon/duo/discussions)
+
 ## Why not just AGENTS.md, CLAUDE.md or repository rules?
 
 Instruction files and rules tell an agent what it should do. They are a good place for conventions, and DUO adds a short block to them when you connect an agent.
@@ -29,6 +31,8 @@ Two Decision Compliance Benchmarks test these claims on fixed fixtures with the 
 ## A Decision compliance example
 
 Recorded with `duoctl` 0.3.0-rc.1 and Codex on an eight-file TypeScript repository. The team wants UI and service code to stop importing the legacy database module. Commands and output below are unedited.
+
+The same check, reproduced step by step with the published 0.3.3 in a new repository, is in the [0.3.3 walkthrough](docs/examples/decision-review-0.3.3.md).
 
 **1. Adopt DUO and connect Codex.**
 
@@ -112,6 +116,7 @@ duoctl doctor
   - Codex loads `.codex/config.toml` only in a trusted project. Trust the folder when Codex asks on first launch, or add it to your `~/.codex/config.toml` with `[projects."/path/to/project"]` and `trust_level = "trusted"`. In Codex, `/mcp` then lists `duo-director`.
   - Claude Code asks before it uses a server from `.mcp.json`. Run `claude` in the project, accept the workspace trust dialog and approve `duo-director`. Until then `claude mcp get duo-director` shows `Pending approval`; `claude mcp reset-project-choices` asks again.
 - `duoctl doctor` checks Git, Project Truth, the index, the analysis level per language, connected agents and the optional LLM settings, and lists the next one to three steps. It only reads.
+- The agent configuration starts whichever `duoctl` is on your PATH. If you also have an older global install, run `duoctl --version` in a normal terminal in the project. Install verification does not warn about a different version yet ([#40](https://github.com/kanghyunsoon/duo/issues/40)).
 
 The local UI (`duoctl ui`) and LLM assistance are optional.
 
@@ -266,6 +271,8 @@ npm install -g .dist/duo-director-cli-<version>.tgz
 ## Contributing
 
 Bug reports, UX friction reports and small fixes are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the [open issues](https://github.com/kanghyunsoon/duo/issues); issues labeled `good first issue` are a good first step. Current work on making DUO need less attention during everyday agent use is tracked in [#2](https://github.com/kanghyunsoon/duo/issues/2).
+
+New to the project? [START_HERE](docs/community/START_HERE.md) walks through forking, branching from `next`, the checks to run and opening the pull request.
 
 ## License and security
 
