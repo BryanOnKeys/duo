@@ -74,9 +74,14 @@ DUO는 SDD(Specification-Driven Development)로 개발한다. 구현은 이 문�
 | [roadmap/0.3.1-t66-p0-triage.md](roadmap/0.3.1-t66-p0-triage.md) | T66 0.3.1 P0 correctness triage(branch next, 감사만): C261~C265 재현·현재 계약·원인(lifecycle field는 lock 밖, R-LOCK은 diff-local, loader가 `type` 대소문자 후보를 버림, review는 working tree Truth·index 사용, context 실패 시 gap 생략)·option 비교, threat model, Patch Group A(authority integrity)·B(review completeness), 0.2.3 backport 없음, 0.3.0 `latest` 유지, H-82 제안 문구, acceptance criteria, 판정 PATCH-0.3.1 |
 | [roadmap/0.3.0-t65-multi-agent-dogfood.md](roadmap/0.3.0-t65-multi-agent-dogfood.md) | T65 0.3.0 stable multi-agent adversarial dogfood(branch next, 평가만): registry 0.3.0, 독립 Codex 세션 6개(A 신규 사용자, B 실제 commit 48, C authority, D hostile 저장소, E coding agent, F 실제 작업 비교), review 376·시나리오 119, false positive·false negative, Coordinator가 재현한 P0 후보 5(C261~C265), 판정 HOLD, External Validation과 분리 |
 | [roadmap/0.3.0-t62-stable-promotion-audit.md](roadmap/0.3.0-t62-stable-promotion-audit.md) | T62 0.3.0 Stable Promotion Decision Audit(branch next, 감사만): evidence baseline, stable 조건, T61 평가, F-26/C259 판단(known limitation), 그 밖의 finding, External Validation 관계, stable source 제약(stable은 main에서만, next → main merge 필요), product delta, stable notes 한계, release guard, 판정 PROMOTE-WITH-GUARD, H-81 제안 문구 |
+| [roadmap/backend-architecture-current.md](roadmap/backend-architecture-current.md) | T87 현재 Backend 구조(코드 변경 없음): 모듈 책임표, 저장 위치, Decision 기능별 진입점·lock·실패·호출자 식별·권한 검사, 세 표면이 같은 서비스를 쓰는지와 우회 경로, 호환성 경계, 기존 테스트 |
+| [roadmap/decision-audit-gap.md](roadmap/decision-audit-gap.md) | T87 #26 Decision 감사 이력 Gap(공개 0.3.3 재현): 단계별 기록, 필드표, 감사 질문 19개 판정, 영향 순 Gap, 재현 스크립트 |
+| [roadmap/decision-rbac-design.md](roadmap/decision-rbac-design.md) | T87 #25 Decision 승인 권한과 신뢰 경계 설계(제안, 승인 전): 위협 모델, 역할·권한 매트릭스, 옵션 A~D 비교와 막지 못하는 것, Local·Team Mode, 권장안, 필요한 테스트, H-88 초안 |
+| [roadmap/backend-api-contract.md](roadmap/backend-api-contract.md) | T87 로컬 UI 서버 API 계약: 현재 API 인벤토리(IMPLEMENTED), 제안 API(PROPOSED), 오류 코드, 동시성·복구, FE mock 타입 |
+| [roadmap/backend-backlog.md](roadmap/backend-backlog.md) | T87 Backend 구현 백로그: BE-GOV·AUD·API·DATA·OPS 항목(SP·Risk·Confidence·선행·Jira 연결), 수용 기준, 첫 Sprint 제안, 6인 협업 경계 |
 | [validation/external-validation-01/README.md](validation/external-validation-01/README.md) | External Validation 01 protocol(T33, H-66 아래 H-67): 사전 등록 질문, 28일 모집 window와 clock-start rule, 독립 maintainer 3명 cohort, eligibility, Day 0 pre-declared alternative, 14일 observation, useful·noise·Truth abandonment 정의, 작성자 개입 기록, exit interview, continue·kill·inconclusive 기준, dropout, privacy·telemetry 없음, product freeze, C239~C241 관찰, 모집 문구(한·영)와 기록 양식. 상태 `recruiting`(2026-10-04T09:37:54Z부터, deadline 2026-11-01T09:37:54Z), recruitment execution(H-68), participant 전 운영 해석(H-69) |
 | [conflicts.md](conflicts.md) | 원본 충돌, Human 결정 기록(H-*), 미결 사항 |
-| [adr/](adr/README.md) | ADR-001~014 |
+| [adr/](adr/README.md) | ADR-001~015(ADR-015는 Proposed) |
 | [tasks/TASKS.md](tasks/TASKS.md) | TASK-000~020(TASK-012A/012B 포함), 의존성, E2E 매핑 |
 
 ## 추적성
