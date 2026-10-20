@@ -5,6 +5,7 @@
  * graph access (no pinned SQLite snapshot, no open transaction between calls).
  */
 import { openGitProvider } from "@duo-director/analyzer";
+import { randomUUID } from "node:crypto";
 import { createDiagnostic, failure, MCP_SERVER_NAME, success, type ParseResult } from "@duo-director/core";
 import { appendRuntimeMetric, type TokenCountMemo } from "@duo-director/director";
 import { McpServer, type CallToolResult, type ServerContext } from "@modelcontextprotocol/server";
@@ -12,6 +13,7 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { NOT_INITIALIZED_FORMAT } from "../operations/common.js";
 import { LLMProviderPool } from "../llm/factory.js";
 import { INPUT, OUTPUT, TOOLS, type ToolContext, type ToolName, type ToolRun } from "./tools.js";
+import { disconnectWorkSession } from "../http/work-map.js";
 
 /**
  * Server-wide guidance returned at initialization (MCP instructions). A few principles only; the
@@ -34,6 +36,8 @@ export interface DuoMcpOptions {
   readonly root: string;
   /** Audit label for proposals ("agent"); not an authentication. */
   readonly agentName?: string;
+  /** Internal identity of this DUO MCP connection, not a host conversation ID. */
+  readonly duoSessionId?: string;
   readonly version: string;
   /** Where diagnostics go (default stderr). Never stdout. */
   readonly log?: (line: string) => void;
@@ -49,6 +53,7 @@ export interface DuoMcpOptions {
 const METERED = new Set<ToolName>(["duo_get_context", "duo_review_changes", "duo_propose_decision"]);
 
 export function createDuoMcpServer(options: DuoMcpOptions): McpServer {
+  const duoSessionId = options.duoSessionId ?? randomUUID();
   const server = new McpServer({ name: MCP_SERVER_NAME, version: options.version }, { capabilities: { tools: {} }, instructions: MCP_INSTRUCTIONS });
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const llm = options.llm ?? new LLMProviderPool(process.env);
@@ -66,7 +71,7 @@ export function createDuoMcpServer(options: DuoMcpOptions): McpServer {
       annotations: { readOnlyHint: tool.readOnly, destructiveHint: false, idempotentHint: tool.readOnly, openWorldHint: false },
     }, async (args: unknown, ctx: ServerContext): Promise<CallToolResult> => {
       const started = Date.now();
-      const toolCtx: ToolContext = { root: options.root, agentName: options.agentName ?? "agent", signal: ctx.mcpReq.signal, llm, tokenCounts };
+      const toolCtx: ToolContext = { root: options.root, agentName: options.agentName ?? "agent", duoSessionId, signal: ctx.mcpReq.signal, llm, tokenCounts };
       const operation = options.toolOverrides?.[name] ?? (tool.run as ToolOverride);
       let run: ToolRun;
       try {
@@ -115,13 +120,16 @@ export async function serveDuoMcp(options: DuoMcpOptions): Promise<ParseResult<D
   }
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   // One environment snapshot and provider pool for the server's lifetime (T12B, C192).
-  const serverOptions = { ...options, llm: options.llm ?? new LLMProviderPool(process.env) };
+  const duoSessionId = randomUUID();
+  const serverOptions = { ...options, duoSessionId, llm: options.llm ?? new LLMProviderPool(process.env) };
   const handle = serveStdio(() => createDuoMcpServer(serverOptions), { onerror: (e) => log(`${MCP_SERVER_NAME}: ${e.message}`) });
   let finish = () => {};
   const closed = new Promise<void>((resolve) => { finish = resolve; });
   let closing: Promise<void> | undefined;
   const close = () => {
     closing ??= handle.close().catch((e: unknown) => log(`${MCP_SERVER_NAME}: ${(e as Error).message}`)).finally(() => {
+      try { disconnectWorkSession(options.root, duoSessionId, new Date()); }
+      catch (e) { log(`${MCP_SERVER_NAME}: work session close: ${(e as Error).message}`); }
       process.stdin.off("end", onEnd).off("close", onEnd);
       process.off("SIGINT", onSignal).off("SIGTERM", onSignal);
       finish();

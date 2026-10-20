@@ -19,6 +19,8 @@ import { diffEnd, projectReview } from "../operations/review.js";
 import { EVIDENCE_SEARCH_FORMAT, searchEvidence } from "../operations/search.js";
 import { projectStatus, STATUS_FORMAT } from "../operations/status.js";
 import { DECISION_FORMAT, getDecision, getRequirement, REQUIREMENT_FORMAT } from "../operations/truth.js";
+import { recordWorkReview, touchWorkTask } from "../http/work-map.js";
+import { parseNodeId } from "@duo-director/core";
 
 export { MCP_SERVER_NAME };
 
@@ -109,6 +111,7 @@ export interface ToolRun {
 export interface ToolContext {
   readonly root: string;
   readonly agentName: string;
+  readonly duoSessionId?: string;
   readonly signal: AbortSignal;
   /** The server's LLM provider pool (T12B): only duo_review_changes with includeSemanticAssist can call a provider. */
   readonly llm: LLMProviderPool;
@@ -164,11 +167,21 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
   },
   duo_get_context: {
     name: "duo_get_context", title: "Project direction context for a task", readOnly: true,
-    description: "Returns project direction context for a task: confirmed intent, relevant code and tests, pending decisions and Knowledge Gaps. Does not modify or index the repository. If the index is stale, returns status index-required (run duoctl index). Surfaced gaps are open questions, not instructions; ask the human only when gaps.requiresHumanInput is true. Pending proposals are not confirmed decisions. If the task names only an Issue ID and you know which files you will change, include their repository paths in the task (for example \"TASK-015 apps/desktop/src/main.ts\").",
+    description: "Returns project direction context for a task: confirmed intent, relevant code and tests, pending decisions and Knowledge Gaps. Does not modify project truth or code, or index; records local work activity for the UI. If the index is stale, returns status index-required (run duoctl index). Surfaced gaps are open questions, not instructions; ask the human only when gaps.requiresHumanInput is true. Pending proposals are not confirmed decisions. If the task names only an Issue ID and you know which files you will change, include their repository paths in the task (for example \"TASK-015 apps/desktop/src/main.ts\").",
     run: async (args, ctx) => {
       const op = await projectContext(ctx.root, { task: args.task, ...(args.budget === undefined ? {} : { budget: args.budget }), ...(args.profile === undefined ? {} : { profile: args.profile }) }, {
         signal: ctx.signal, ...(ctx.tokenCounts === undefined ? {} : { tokenCounts: ctx.tokenCounts }),
       });
+      if (op.kind === "ok") {
+        const resolution = op.payload.context.resolution;
+        const candidates = resolution?.ambiguities.length === 0 ? resolution.seeds
+          .filter((s) => { const type = parseNodeId(s.id)?.type; return type === "issue" || type === "requirement" || type === "decision" || type === "milestone" || type === "file"; }) ?? [] : [];
+        const explicit = candidates.filter((s) => s.match === "id");
+        const targetRef = explicit.length === 1 ? explicit[0]?.id : explicit.length > 1 ? undefined
+          : candidates.length === 1 ? candidates[0]?.id : undefined;
+        touchWorkTask(ctx.root, ctx.agentName, args.task, new Date(), ctx.duoSessionId === undefined ? undefined
+          : { duoSessionId: ctx.duoSessionId, ...(targetRef === undefined ? {} : { targetRef }) });
+      }
       const p = op.kind === "ok" ? op.payload : undefined;
       return { op, metric: { status: p?.status ?? op.kind, ...(p?.context.packet === undefined ? {} : { contextTokens: p.context.packet.metrics.budget.used, contextBudget: p.context.packet.metrics.budget.total }), llmCalls: 0 } };
     },
@@ -189,6 +202,14 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
         ...(args.task === undefined ? {} : { task: args.task }), ...(args.budget === undefined ? {} : { budget: args.budget }),
         ...(args.includeSemanticAssist === undefined ? {} : { includeSemanticAssist: args.includeSemanticAssist }),
       }, { signal: ctx.signal, llm: ctx.llm, ...(ctx.tokenCounts === undefined ? {} : { tokenCounts: ctx.tokenCounts }) });
+      if (op.kind === "ok" && args.task !== undefined) {
+        const at = new Date();
+        touchWorkTask(ctx.root, ctx.agentName, args.task, at,
+          ctx.duoSessionId === undefined ? undefined : { duoSessionId: ctx.duoSessionId });
+        if (ctx.duoSessionId !== undefined && op.payload.diff !== undefined) recordWorkReview(ctx.root, ctx.duoSessionId, args.task,
+          { digest: op.payload.diff.identity, ...(op.payload.verdict === undefined ? {} : { verdict: op.payload.verdict }),
+            claimCount: op.payload.claims.length }, at);
+      }
       const r = op.kind === "ok" ? op.payload : undefined;
       return { op, metric: { status: r?.status ?? op.kind, ...(r?.verdict === undefined ? {} : { reviewVerdict: r.verdict }), ...(r === undefined ? {} : { reviewClaims: r.claims.length, ...reviewLlmMetric(r) }) } };
     },

@@ -38,7 +38,7 @@ describe("duo-director MCP: protocol, tool list as the permission contract, argu
       expect(t.annotations?.readOnlyHint).toBe(t.name !== "duo_propose_decision");
     }
     const describe = (n: string) => tools.find((t) => t.name === n)?.description ?? "";
-    expect(describe("duo_get_context")).toMatch(/Does not modify or index the repository.*index-required/su);
+    expect(describe("duo_get_context")).toMatch(/Does not modify project truth or code, or index.*index-required/su);
     expect(describe("duo_review_changes")).toContain("Does not modify code or project truth");
     expect(describe("duo_propose_decision")).toMatch(/proposal only.*Cannot confirm or reject a decision/su);
   });
@@ -138,6 +138,8 @@ describe("existing project through MCP: freshness, CLI parity, WAL, metrics, pro
     expect(ctx).toMatchObject({ format: "duo.context/1", status: "ready", context: { packet: { format: "duo.context-packet/1" } } });
     expect(typeof ctx.gaps.requiresHumanInput).toBe("boolean");
     expect(ctx.gaps.notice).toMatch(/not confirmed instructions/u);
+    const activity = JSON.parse(fs.readFileSync(path.join(p.root, ".duo-project", "runtime", "work-tasks.json"), "utf8")) as { tasks: { agent: string; name: string }[] };
+    expect(activity.tasks).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Scheduler.next" })]));
     const missing = await s.call("duo_trace", { node: "NoSuchThing" });
     expect(missing.isError).toBeFalsy();
     expect(missing.structuredContent).toMatchObject({ format: "duo.trace/1", status: "not-found" });
@@ -154,8 +156,9 @@ describe("existing project through MCP: freshness, CLI parity, WAL, metrics, pro
     const rv = await s.call("duo_review_changes", {});
     expect(rv.isError).toBeFalsy();
     expect(rv.structuredContent.status).toBe("index-required");
-    // Nothing indexed by the reads (metrics.jsonl is the only file the metered tools append to).
-    expect(snapshot(p.root).filter(([f]) => !f.endsWith("metrics.jsonl"))).toEqual(before.filter(([f]) => !f.endsWith("metrics.jsonl")));
+    // Nothing indexed by the reads; metered calls update only metrics and local work activity.
+    const withoutRuntime = (items: ReturnType<typeof snapshot>) => items.filter(([f]) => !f.endsWith("metrics.jsonl") && !f.endsWith("work-tasks.json"));
+    expect(withoutRuntime(snapshot(p.root))).toEqual(withoutRuntime(before));
     // The CLI writes the graph while this MCP server is running.
     const idx = duoctl(p.root, ["index", "--json"]);
     expect(idx.code).toBe(0);
@@ -184,7 +187,7 @@ describe("existing project through MCP: freshness, CLI parity, WAL, metrics, pro
     expect((await s.call("duo_get_status")).structuredContent.index.status).toBe("current");
   });
 
-  it("propose is the only write: P-001 is a pending proposal, not a Decision, and nothing can confirm it", async () => {
+  it("propose is the only Project Truth write: P-001 is pending, and nothing can confirm it", async () => {
     const r = await s.call("duo_propose_decision", {
       title: "Weekday rotation", question: "Should the rotation skip weekends?", answer: "Yes, weekdays only.", governs: { paths: ["src/scheduler.ts"] }, agent: "codex",
     });

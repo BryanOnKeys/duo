@@ -8,10 +8,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDefaultAnalyzerRegistry, type AnalyzerRegistry } from "@duo-director/analyzer";
-import { createDecisionService } from "@duo-director/core";
+import { createDecisionService, definitionRef, nodeId } from "@duo-director/core";
 import { captureAdoptionBaseline } from "@duo-director/director";
 import { indexRepository, openProjectGraphStore } from "@duo-director/graph";
 import { LLMProviderPool, startDuoUiServer, type DuoUiServer } from "@duo-director/integration";
+import { completeWorkTask, recordWorkReview, touchWorkTask } from "../../packages/integration/src/http/work-map.js";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -88,6 +89,113 @@ afterAll(async () => {
 });
 
 describe("DUO UI in a browser (T18.1)", () => {
+  it("renders the work map from compact DUO graph data", async (ctx) => {
+    if (browser === undefined) return ctx.skip();
+    const r = repo("review/app");
+    await r.index();
+    const { page, server, errors } = await open(r.root);
+    await page.goto(`${server.origin}/work`);
+    await page.getByRole("heading", { name: "Work map", level: 1 }).waitFor();
+    await page.getByLabel("Work name").fill("Refresh flow");
+    await page.getByLabel("DUO Issue ID (optional)").fill("AUTH-7");
+    await page.getByRole("button", { name: "Add work" }).click();
+    await page.getByText("[Codex] Refresh flow").first().waitFor();
+    await page.locator(".react-flow__node").filter({ hasText: "[Codex] Refresh flow" }).click();
+    await page.getByRole("button", { name: "Mark completed" }).waitFor();
+    const nodes = page.locator(".react-flow__node");
+    const count = await nodes.count();
+    expect(count).toBeGreaterThan(1);
+    expect(await page.getByText("Loading…").count()).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
+  it("shows live agent work, review, file changes and completion without refreshing", async (ctx) => {
+    if (browser === undefined) return ctx.skip();
+    const liveUpdateTimeoutMs = 30_000;
+    const r = repo("review/app");
+    await r.index();
+    const { page, server, errors } = await open(r.root);
+    const mapResponses: { at: number; revision: string | undefined; review: unknown; durationMs: number | undefined }[] = [];
+    const revisionResponses: { at: number; revision: string | undefined; durationMs: number | undefined }[] = [];
+    page.on("response", async (response) => {
+      const endpoint = new URL(response.url()).pathname;
+      if (!response.ok() || (endpoint !== "/api/work-map" && endpoint !== "/api/work-revision")) return;
+      const result = await response.json().catch(() => undefined) as
+        { data?: { revision?: string; nodes?: { type: string; review?: unknown }[] }; meta?: { durationMs?: number } } | undefined;
+      if (result === undefined) return;
+      if (endpoint === "/api/work-map") mapResponses.push({ at: Date.now(), revision: result.data?.revision,
+        review: result.data?.nodes?.find((n) => n.type === "task")?.review, durationMs: result.meta?.durationMs });
+      else revisionResponses.push({ at: Date.now(), revision: result.data?.revision, durationMs: result.meta?.durationMs });
+    });
+    await page.goto(`${server.origin}/work`);
+    await see(page, "Add a work item to explore its DUO neighbourhood.");
+    const session = "live-graph-session";
+    const name = "Live graph probe";
+    const targetRef = nodeId(definitionRef("issue", "AUTH-7"));
+    const timings: Record<string, number> = {};
+    const start = Date.now();
+    const task = touchWorkTask(r.root, "Codex", name, new Date(), { duoSessionId: session, targetRef });
+    expect(task).toBeDefined();
+    const node = page.locator(".react-flow__node").filter({ hasText: `[Codex] ${name}` });
+    try { await node.waitFor({ timeout: liveUpdateTimeoutMs }); }
+    catch (error) {
+      const currentMap = await page.evaluate("fetch('/api/work-map').then(r => r.json()).then(r => r.data)") as { nodes?: { type: string; label: string }[] };
+      console.log(`WORK_MAP_TASK_DEBUG ${JSON.stringify({ mapResponses, revisionResponses,
+        serverTask: currentMap.nodes?.find((n) => n.type === "task"), page: await page.locator(".work-page").textContent(), errors })}`);
+      throw error;
+    }
+    timings.taskVisibleMs = Date.now() - start;
+    await node.click();
+    await page.locator(".work-detail").getByRole("heading", { name: `[Codex] ${name}` }).waitFor();
+    expect(await page.locator(".work-detail").textContent()).toContain(targetRef);
+    await page.evaluate(`(() => {
+      const blankMs = [];
+      let absentAt;
+      const observer = new MutationObserver(() => {
+        const present = document.querySelector(".react-flow__node") !== null;
+        if (!present && absentAt === undefined) absentAt = performance.now();
+        else if (present && absentAt !== undefined) { blankMs.push(performance.now() - absentAt); absentAt = undefined; }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      window.workGraphProbe = { blankMs, observer };
+    })()`);
+
+    const reviewStart = Date.now();
+    recordWorkReview(r.root, session, name, { digest: "live-graph-review", verdict: "ASK", claimCount: 2 }, new Date());
+    try { await page.getByText("Review ASK · 2 claims").waitFor({ timeout: liveUpdateTimeoutMs }); }
+    catch (error) {
+      const currentMap = await page.evaluate("fetch('/api/work-map').then(r => r.json()).then(r => r.data)") as { nodes?: { type: string; review?: unknown }[] };
+      const stored = JSON.parse(fs.readFileSync(path.join(r.root, ".duo-project/runtime/work-tasks.json"), "utf8")) as { tasks: { review?: unknown }[] };
+      console.log(`WORK_MAP_REVIEW_DEBUG ${JSON.stringify({ mapResponses, revisionResponses,
+        detail: await page.locator(".work-detail").textContent(), storedReview: stored.tasks[0]?.review,
+        serverReview: currentMap.nodes?.find((n) => n.type === "task")?.review, errors })}`);
+      throw error;
+    }
+    timings.reviewVisibleMs = Date.now() - reviewStart;
+
+    const fileStart = Date.now();
+    r.write("live-graph-probe.txt", "changed while the page is open\n");
+    await page.locator(".react-flow__node").filter({ hasText: "live-graph-probe.txt" }).waitFor({ timeout: liveUpdateTimeoutMs });
+    await page.getByText("Index stale").waitFor({ timeout: liveUpdateTimeoutMs });
+    timings.fileVisibleMs = Date.now() - fileStart;
+    const blankMs = await page.evaluate(`(() => {
+      window.workGraphProbe?.observer.disconnect();
+      return window.workGraphProbe?.blankMs ?? [];
+    })()`) as number[];
+
+    const completeStart = Date.now();
+    completeWorkTask(r.root, task?.id ?? "", new Date());
+    await node.waitFor({ state: "detached", timeout: liveUpdateTimeoutMs });
+    timings.completedVisibleMs = Date.now() - completeStart;
+    expect(mapResponses.length).toBeGreaterThanOrEqual(4);
+    expect(Math.max(0, ...blankMs)).toBeLessThan(500);
+    expect(errors).toEqual([]);
+    console.log(`WORK_MAP_LIVE_METRICS ${JSON.stringify({ ...timings, blankMs, mapResponses: mapResponses.length,
+      revisionResponses: revisionResponses.length,
+      maxMapDurationMs: Math.max(...mapResponses.map((r) => r.durationMs ?? 0)),
+      maxRevisionDurationMs: Math.max(...revisionResponses.map((r) => r.durationMs ?? 0)) })}`);
+  });
+
   it("overview, direction, context, review, confirm and reject, stale index and a deep link", async (ctx) => {
     if (browser === undefined) return ctx.skip();
     const r = repo("review/app");

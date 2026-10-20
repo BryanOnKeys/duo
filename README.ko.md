@@ -115,7 +115,7 @@ duoctl doctor
   - Claude Code는 `.mcp.json`의 서버를 쓰기 전에 승인을 묻습니다. project에서 `claude`를 실행해 workspace trust 대화상자를 수락하고 `duo-director`를 승인하세요. 승인 전에는 `claude mcp get duo-director`가 `Pending approval`을 보이고, `claude mcp reset-project-choices`로 다시 물을 수 있습니다.
 - `duoctl doctor`는 Git, Project Truth, index, 언어별 분석 수준, 연결한 Agent, 선택 LLM 설정을 확인하고 다음 할 일을 1~3개 보여 줍니다. 읽기만 합니다.
 
-로컬 UI(`duoctl ui`)와 LLM 보조는 선택 사항입니다.
+로컬 UI(`duoctl ui`)와 LLM 보조는 선택 사항입니다. 로컬 UI의 [Work map](docs/work-map.md)은 작업과 DUO 그래프의 관련 노드를 보여 줍니다.
 
 ## DUO의 동작
 
