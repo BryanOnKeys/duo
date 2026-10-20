@@ -41,9 +41,12 @@
 | BE-GOV-13 | 모든 표면에서 agent 확정 우회 방지 회귀 테스트 | EP-04 | Sub-task | QA / Testing | AI-1(BE-1 지원) | 3 | P1 | HIGH | MEDIUM | GOV-05 | S15P31A106-306 | 미구현 |
 | BE-GOV-14 | 병렬 승인 요청 일관성 | EP-04 | Sub-task | QA / Testing | AI-4 | 3 | P1 | HIGH | LOW | GOV-05, #34 | S15P31A106-307, #34 | 미구현 |
 | BE-GOV-15 | DUO 저장소 CODEOWNERS와 code owner review | EP-04 | Task | Governance / Security | BE-1 | 2 | P2 | MEDIUM | MEDIUM | HD | S15P31A106-246 | 미구현 |
-| BE-AUD-01 | 이벤트 형식 `duo.decision-event/1`, `decisions/events/` 쓰기 경계 | EP-04 | Story | Core / Truth, Decision | BE-1 | 3 | P1 | HIGH | MEDIUM | HD | 신규 | 미구현 |
+| BE-GOV-16 | 신뢰 상태 확인(호스트 branch 규칙 조회, `LOCAL`·`VERIFIED`·`NOT_MET`·`UNVERIFIED`, T94) | EP-04 | Story | Governance / Security, CLI | BE-1 | 3 | P1 | HIGH | LOW | GOV-03, rbac 설계 §11 사실 확인, HD | 신규 | 미구현 |
+| BE-GOV-17 | `decision verify --ci`의 정책 경로 변경 보고, 이벤트 append-only, stale 승인 검사(T94) | EP-04 | Story | Governance / Security, CLI | BE-1 | 3 | P1 | HIGH | MEDIUM | GOV-09, AUD-04 | 신규 | 미구현 |
+| BE-GOV-18 | `decision adopt`와 Team Mode bootstrap 검증(T94) | EP-04 | Story | Decision, CLI | BE-1 | 3 | P2 | HIGH | MEDIUM | AUD-01, GOV-07 | 신규 | 미구현 |
+| BE-AUD-01 | 이벤트 형식 `duo.decision-event/1`, `decisions/events/<subject>/<eventId>.json`(이벤트당 파일 1개, T94) 쓰기 경계 | EP-04 | Story | Core / Truth, Decision | BE-1 | 3 | P1 | HIGH | MEDIUM | HD | 신규 | 미구현 |
 | BE-AUD-02 | propose·confirm·reject·repair에서 lock 안에 이벤트 기록 | EP-04 | Story | Decision | BE-1 | 5 | P1 | HIGH | LOW | AUD-01 | 신규 | 미구현 |
-| BE-AUD-03 | 본 digest, 표면, Git identity, 사유, based_on·stale 기록 | EP-04 | Task | Decision | BE-1 | 2 | P1 | MEDIUM | MEDIUM | AUD-02 | 신규 | 미구현 |
+| BE-AUD-03 | 본 digest, 표면, actor label, 사유, `basedOn`·`prevHash`·stale 기록(Git email은 opt-in, T94) | EP-04 | Task | Decision | BE-1 | 2 | P1 | MEDIUM | MEDIUM | AUD-02 | 신규 | 미구현 |
 | BE-AUD-04 | 이벤트 해시 체인과 무결성 검사(doctor·verify) | EP-04 | Task | Decision, Governance / Security | BE-1 | 3 | P2 | MEDIUM | MEDIUM | AUD-02 | 신규 | 미구현 |
 | BE-AUD-05 | 이력 read model(이벤트, 대체 사슬, lock, 파일 추론 fallback) | EP-04 | Sub-task | Core / Truth | BE-1 | 3 | P2 | MEDIUM | MEDIUM | AUD-02 | S15P31A106-244(분할) | 미구현 |
 | BE-AUD-06 | `duoctl decision history <id>` | EP-04 | Sub-task | CLI | BE-1 | 2 | P2 | LOW | HIGH | AUD-05 | S15P31A106-244(분할) | 미구현 |
@@ -87,10 +90,13 @@ CI 안정성(#37)은 기존 S15P31A106-233(AI-4)이 맡고 있어 새로 만들�
 | BE-GOV-13 | 서비스·CLI·UI·MCP·세션 계획 어느 경로로도 agent kind 확정이 불가 | 표면별 테스트 |
 | BE-GOV-14 | 같은 proposal 동시 확정은 1건만 성공, 같은 대상 동시 supersede는 1건만 성공, Decision Lock·digest 유지 | 동시 실행 테스트(#34 스크립트 재사용) |
 | BE-GOV-15 | CODEOWNERS가 Decision·거버넌스·release 경로를 maintainer에게 지정, ruleset이 code owner review를 요구, 기존 release 절차가 막히지 않음 | ruleset 사전 검증(T84 방식) |
-| BE-AUD-01 | 이벤트 스키마([API 계약](backend-api-contract.md) §7의 DecisionEvent)와 `decisions/events/<D 또는 P>.jsonl` 쓰기 경계. append만 허용 | 스키마·경계 테스트 |
+| BE-GOV-16 | 지원 호스트에서 규칙을 읽어 상태를 계산, 읽지 못하면 항상 `UNVERIFIED`, `VERIFIED`도 자격증명 분리는 미확인으로 표시. review·context 판정과 종료 코드는 그대로 | 호스트 응답 mock(권한 부족, 오프라인, bypass 불가시, 조건 누락) |
+| BE-GOV-17 | PR이 정책 경로를 바꾸면 결과 맨 위에 보고. base 대비 이벤트 파일 수정·삭제·이름 변경과 `basedOn` 불일치(stale 승인)는 실패 | CI fixture(병렬 확정 두 branch) |
+| BE-GOV-18 | 기존 확정·대체·거절 Decision마다 `adopt` 이벤트, lock 없는 확정 Decision·무결성 오류가 있으면 bootstrap 실패, 이력은 만들어 내지 않음 | 전환 fixture(0.3.3 저장소) |
+| BE-AUD-01 | 이벤트 스키마([API 계약](backend-api-contract.md) §7의 DecisionEvent)와 `decisions/events/<subject>/<eventId>.json` 쓰기 경계. 파일 1개 = 이벤트 1건, 한 번 쓴 파일은 고치지 않음. 0.3.3 loader가 무시하는 확장자(`.json`) | 스키마·경계 테스트, 0.3.3 loader 호환 테스트 |
 | BE-AUD-02 | 조작마다 정확히 이벤트 1건, commit 지점과의 순서가 정의됨(파일 생성 성공 뒤 이벤트, 실패 시 repair가 보충) | 실패 주입 테스트(`DecisionFileSystem` mock) |
-| BE-AUD-03 | 이벤트에 본 digest, 표면, Git name·email, 사유, `based_on`, stale 여부가 들어감 | 단위 테스트 |
-| BE-AUD-04 | 이전 이벤트 해시로 체인을 만들고, 깨지거나 빠진 이벤트를 doctor·verify가 보고 | 변조 fixture |
+| BE-AUD-03 | 이벤트에 본 digest, 표면, actor label, 사유, `basedOn`·`prevHash`, stale 여부가 들어감. Git email은 `governance.yaml` opt-in일 때만 | 단위 테스트 |
+| BE-AUD-04 | subject별 `basedOn`·`prevHash` 체인을 검사하고, 깨지거나 빠진 이벤트를 doctor·verify가 보고. 체인은 변조 탐지이며 서명이 아님을 출력에 명시 | 변조 fixture |
 | BE-AUD-05 | Decision ID로 이벤트, 대체 사슬, lock 상태를 반환. 이벤트가 없는 기존 Decision은 파일에서 추론하고 `derived: true` | read model 테스트 |
 | BE-AUD-06 | `decision history D-###`가 사람용 표와 `--json`을 출력 | CLI e2e |
 | BE-AUD-07 | Team Mode에서 이벤트 없는 확정 Decision을 doctor가 action으로 표시 | doctor 테스트 |
@@ -117,13 +123,13 @@ CI 안정성(#37)은 기존 S15P31A106-233(AI-4)이 맡고 있어 새로 만들�
 
 | 묶음 | 항목 | SP(미정 제외) | HD 없이 가능한 항목 |
 |---|---|---|---|
-| BE-GOV | 15 | 42 | GOV-06(사실 확인 뒤) |
+| BE-GOV | 18 | 51 | GOV-06(사실 확인 뒤) |
 | BE-AUD | 9 | 23 | 없음 |
 | BE-API | 7 | 14 | API-02, API-05 |
 | BE-DATA | 3(+예약 1) | 7 | DATA-05(#4 쪽 결정은 이미 있음) |
 | BE-OPS | 6 | 12 | 없음 |
 
-완료로 표시한 GOV-01·02(6 SP)를 빼면 구현 SP는 92다. 이 중 BE-1 단독이 아닌 항목은 GOV-12(AI-2), GOV-13(AI-1), GOV-14(AI-4), OPS-04(AI-3)다.
+완료로 표시한 GOV-01·02(6 SP)를 빼면 구현 SP는 101이다(T94에서 GOV-16·17·18, 9 SP 추가). 이 중 BE-1 단독이 아닌 항목은 GOV-12(AI-2), GOV-13(AI-1), GOV-14(AI-4), OPS-04(AI-3)다.
 
 ## 5. 첫 백엔드 Sprint 제안(H-88 승인 직후, 2주)
 

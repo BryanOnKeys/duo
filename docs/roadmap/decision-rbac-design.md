@@ -1,6 +1,6 @@
 # Decision 승인 권한(RBAC)과 신뢰 경계 설계(#25, T87)
 
-상태: **제안(Maintainer 승인 전)**. 이 문서는 [Issue #25](https://github.com/kanghyunsoon/duo/issues/25)의 설계 산출물이다. 제품 규칙은 바뀌지 않았고, 승인되면 [ADR-015](../adr/ADR-015-decision-authority-team-mode.md)(proposed)와 Human Decision으로 확정한다. 현재 구조는 [backend-architecture-current.md](backend-architecture-current.md), 감사 Gap은 [decision-audit-gap.md](decision-audit-gap.md)에 있다.
+상태: **제안(Maintainer 승인 전, T87 초안, T94 수정)**. 이 문서는 [Issue #25](https://github.com/kanghyunsoon/duo/issues/25)의 설계 산출물이다. 제품 규칙은 바뀌지 않았고, 승인되면 [ADR-015](../adr/ADR-015-decision-authority-team-mode.md)(proposed)와 Human Decision으로 확정한다. 현재 구조는 [backend-architecture-current.md](backend-architecture-current.md), 감사 Gap은 [decision-audit-gap.md](decision-audit-gap.md)에 있다.
 
 ## 1. 권장안 요약
 
@@ -12,6 +12,7 @@
    - `.duo-project/decisions/**`와 `governance.yaml`은 CODEOWNERS 승인자의 리뷰 없이는 병합되지 않게 한다.
    - CI 검증(`duoctl decision verify --ci`)이 lock, 확정 이벤트, 승인자 매핑을 확인한다.
    - lock이 없거나 이벤트가 없는 Decision 파일은 Team Mode에서 오류(fail-closed)다.
+   - 이 보장은 §12의 전제(호스트가 code owner 리뷰를 필수로 강제, 정책 경로에 관리자 bypass 없음, agent 환경에 승인·병합·bypass 가능한 토큰 없음)가 있을 때만 주장한다. DUO가 호스트 설정을 확인하지 못하면 신뢰 상태는 `UNVERIFIED`다.
 4. **감사 이벤트(BE-AUD)를 추가한다.** 실패와 복구를 포함해 승인 이력을 Git이 추적하는 이벤트 파일로 남긴다. 이벤트는 "주장"이고, 신뢰는 그 이벤트가 리뷰를 거쳐 병합됐다는 사실에서 나온다.
 
 서명 승인(D)은 GitHub를 쓰지 않거나 오프라인 증명이 필요한 팀을 위한 후속 확장으로 미룬다.
@@ -37,6 +38,9 @@
 | W4 파일 직접 작성 | lock 없는 `D-###.yaml` 작성, lock digest 재계산 | **막지 못함**(S7c). lock은 실수 감지용 |
 | W5 이력 조작 | rebase, force push로 Decision commit 지우기 | DUO 범위 밖. GitHub ruleset(force push 금지)이 막음 |
 | W6 본 것과 다른 내용 확정 | preview 뒤 proposal 변경 | **막음**(`DECISION_CONFIRM_PREVIEW_CHANGED`, S2) |
+| W7 관리자 bypass | ruleset bypass를 가진 사람(또는 그 토큰)이 리뷰 없이 Decision·정책 변경을 보호 branch에 넣음 | DUO 범위 밖. Team Mode 전제에서 정책 경로 bypass를 없애거나 잔여 위험으로 표시(§13) |
+| W8 agent가 사람의 호스팅 토큰 사용 | 셸 agent가 승인자의 `gh` 인증으로 PR 승인·병합 | **막지 못함.** 운영 요건(agent 환경 토큰 분리)으로만 다룸. 충족을 확인할 수 없으므로 강한 보장은 이 전제가 있을 때만 주장(§12) |
+| W9 정책·CI 약화 PR | PR이 workflow, CODEOWNERS, `governance.yaml`, 검증 버전을 바꿔 검사를 끄거나 자기 승인을 만듦 | 필수 code owner 리뷰로만 막음. 리뷰어가 놓치면 통과(§13) |
 
 **핵심 한계:** 공격자(agent 포함)가 같은 파일 시스템 권한을 가지면 로컬 DUO는 완전한 RBAC를 강제할 수 없다. 로컬에서 "관리자 플래그"나 역할 설정을 확인하는 기능은 실수 방지(UX)로만 설명한다.
 
@@ -128,7 +132,8 @@ A: 현재 actor label 정책 유지. B: Decision별 owner·approver 목록과 Gi
 | 감사 이벤트 | 기록(`decisions/events/`) | 기록 + 이벤트 없는 확정 Decision은 오류 |
 | 팀 권한의 근거 | 로컬 파일 | 보호 branch 병합(code owner 리뷰) + CI 검증 |
 | agent 실행 환경 감지 | 확정 거부(실수 방지, 우회 가능하다고 명시) | 같음 |
-| 필요한 외부 설정 | 없음 | CODEOWNERS, ruleset(required review, code owner review, bypass 없음), CI의 `pull-requests: read` |
+| 필요한 외부 설정 | 없음 | CODEOWNERS(정책 경로 포함), ruleset(승인 1건 이상, code owner 리뷰 필수, stale 승인 해제, 마지막 push 승인, force push 금지, 정책 경로 bypass 없음), CI의 `pull-requests: read`, agent 환경의 토큰 분리(운영 요건) |
+| 신뢰 상태 표시 | `LOCAL` | `VERIFIED` / `NOT_MET` / `UNVERIFIED`(§12) |
 
 ## 7. 권장안의 근거
 
@@ -154,12 +159,13 @@ A: 현재 actor label 정책 유지. B: Decision별 owner·approver 목록과 Gi
 |---|---|
 | `D-###.yaml`, `P-###.yaml` 스키마 | 1단계 변화 없음. 대체 시각·승인 사유는 이벤트에 기록 |
 | `governance.yaml` | 신규 선택 파일. loader 스키마와 쓰기 경계(project-truth, DUO는 쓰지 않음)에 추가 |
-| `decisions/events/` | 신규 tracked 영역(project-truth 안, DecisionService만 append) |
+| `decisions/events/` | 신규 tracked 영역(project-truth 안, DecisionService만 씀). 이벤트 1건당 `.json` 파일 1개(§14). 0.3.3 loader는 `decisions/`에서 `.yaml`·`.yml`만 읽으므로 이 파일을 무시한다 |
 | Decision Lock | 변화 없음(대상 필드 그대로) |
 | UI API | additive(`/api/me`, 이력 조회, confirm 사유 선택 필드). [backend-api-contract.md](backend-api-contract.md) |
 | MCP | 9개 tool 이름·스키마 그대로. 확정 도구 없음 유지 |
 | CLI | 신규 하위 명령(`decision history`, `decision verify`, `decision withdraw`), 신규 진단 코드. 기존 종료 코드 의미 유지 |
-| 기존 저장소 | Local Mode 기본이라 아무것도 바뀌지 않음 |
+| 기존 저장소 | Local Mode 기본이라 아무것도 바뀌지 않음. Team Mode 전환은 §15 |
+| 0.3.3 이하 클라이언트 | `governance.yaml`을 읽지 않으므로 Team Mode 저장소를 Local Mode로 다룬다. 팀 권한은 병합 리뷰가 강제하므로 안전성은 유지되지만, 로컬 경고는 보이지 않는다. CI는 Team Mode를 아는 버전으로 고정한다 |
 
 ## 9. 구현에 필요한 테스트
 
@@ -171,20 +177,202 @@ A: 현재 actor label 정책 유지. B: Decision별 owner·approver 목록과 Gi
 - 이벤트: confirm·reject·repair·실패마다 이벤트 1개, 같은 요청 재시도는 중복 이벤트 없음, 해시 체인 깨짐 감지.
 - CI 검증: Decision 파일이 바뀐 PR에서 lock·이벤트·승인자 매핑을 검사하고, 위반 시 실패.
 - 동시 확정: 같은 proposal 두 번, 같은 대상을 두 proposal이 supersede(#34와 공유).
+- 신뢰 상태: 호스트 설정을 읽을 수 없을 때, 미지원 호스트일 때, code owner 리뷰가 꺼져 있을 때 각각 `UNVERIFIED`, `UNVERIFIED`, `NOT_MET`. `VERIFIED` 표시에도 자격증명 전제는 "확인되지 않음"으로 함께 나온다.
+- 정책 경로: PR이 workflow·CODEOWNERS·`governance.yaml`·검증 버전을 바꾸면 CI 출력이 그 사실을 맨 위에 보고한다.
+- 이벤트: 기존 이벤트 파일의 수정·삭제·이름 변경이 있는 PR은 CI 실패. 같은 Decision에 같은 `based_on`을 가진 확정 이벤트가 둘이면 나중 병합 쪽이 실패.
+- 전환: bootstrap PR이 lock 없는 확정 Decision을 남기면 실패하고, Team Mode가 켜지지 않는다.
 
-## 10. Maintainer가 승인해야 할 결정(초안 H-88)
+## 10. Maintainer가 결정할 항목(초안 H-88, 미승인)
 
-1. 권장안(C를 신뢰 경계로 쓰고, B는 실수 방지, 감사 이벤트 추가, D는 후속) 채택 여부
-2. Team Mode를 `governance.yaml`로 여는 선택 기능으로 만들지, 역할 이름(ADMIN·APPROVER·DEVELOPER·AI_AGENT·READ_ONLY)
-3. Team Mode에서 lock·이벤트 없는 Decision을 오류로 할지(ADR-013 수동 fallback을 Team Mode에서 제한)
-4. 감사 이벤트를 Git이 추적하는 `decisions/events/`에 둘지, 저장할 개인정보 범위(표시 이름, Git email)
-5. agent 실행 환경 감지 거부를 실수 방지 기능으로 넣을지
-6. DUO 저장소 자체에 CODEOWNERS·code owner review를 적용할지(Jira S15P31A106-246)
+T94에서 선택지와 권고를 붙였다. 권고는 설계 제안일 뿐 결정이 아니다.
+
+| # | 결정 | 선택지 | 권고 | 결정 전 영향 |
+|---|---|---|---|---|
+| 1 | Team Mode 신뢰 경계 | C(호스트 병합 리뷰) / D(서명) / A·B 유지 | C, D는 후속 | Team Mode 구현 전체가 대기 |
+| 2 | Team Mode를 `governance.yaml` 선택 기능으로, 역할 다섯 개 | 채택 / 역할 축소(APPROVER·DEVELOPER만) | 채택 | BE-GOV-03 이후 대기 |
+| 3 | 자격증명 전제(agent 환경에 승인·병합·bypass 가능 토큰 금지)를 Team Mode 필수 운영 요건으로 둘지 | 필수 요건 / 권장 사항 | **필수 요건.** 없으면 강한 보장을 주장하지 않음 | 미결이면 ADR-015 승인 불가 |
+| 4 | 정책 경로의 관리자 bypass | bypass 없음 / PR 병합만 허용하는 bypass / 현행 유지(잔여 위험 표시) | 정책 경로는 bypass 없음. release 경로와 ruleset을 나눔 | DUO 저장소 ruleset 제안(§13.4) 적용 여부와 연결 |
+| 5 | 신뢰 상태 이름과 표시 위치(`LOCAL`·`VERIFIED`·`NOT_MET`·`UNVERIFIED`; doctor·status·UI·CI) | 채택 / 이름 변경 | 채택 | API-01 mock 필드 이름 |
+| 6 | 지원 호스트 | GitHub만 / GitHub + 수동 확인된 호스트 목록 | GitHub만으로 시작. GitLab(SSAFY mirror)은 확인 전 `UNVERIFIED` | 없음 |
+| 7 | Team Mode에서 lock·이벤트 없는 Decision을 오류로(ADR-013 fallback 제한) | 오류 / 경고 | 오류(fail-closed) | BE-GOV-07 |
+| 8 | 감사 이벤트 저장 방식과 개인정보 | 이벤트당 파일(§14) / Decision당 append 파일 | 이벤트당 파일, Git email 기본 미저장(opt-in) | BE-AUD-01 |
+| 9 | 실패·중단 흐름 기록 범위 | 사용자 의도 뒤의 실패만 / 모든 실패 / 기록 안 함 | 사용자 의도 뒤의 실패(digest 변경, 권한 거부, 중단 repair)만 | BE-AUD-02 |
+| 10 | 기존 저장소 전환(bootstrap PR, §15) | bootstrap 승인 = 기존 Decision 신뢰 출발점 / Decision마다 재확정 | bootstrap 승인 | BE-OPS-03 |
+| 11 | agent 실행 환경 감지 거부(실수 방지) | 넣음 / 넣지 않음 | 공식 문서로 표지를 확인한 뒤 넣음 | BE-GOV-06 |
+| 12 | DUO 저장소 자체에 CODEOWNERS·code owner 리뷰 적용(Jira S15P31A106-246) | 지금 / Team Mode 구현 뒤 | 정책 경로 공동 owner가 2명 이상 정해진 뒤 | 저장소 운영 |
 
 ## 11. 구현 전에 확인할 사실
 
 - 각 agent가 공식 문서에 남긴 실행 환경 변수(감지 기준). 추측한 변수 이름으로 구현하지 않는다.
 - CI에서 PR 리뷰를 읽는 데 필요한 GitHub 권한과 fork PR에서의 동작
+- GitHub의 branch 규칙 조회 API가 읽기 권한으로 무엇을 보여 주는지. 특히 bypass 대상 목록은 관리자 권한 없이 보이지 않을 수 있다. 보이지 않으면 bypass 항목은 `UNVERIFIED`로 둔다.
+- PR의 필수 code owner가 base branch의 CODEOWNERS로 정해지는지(PR이 CODEOWNERS를 바꿔 자기 승인을 만들 수 없는지) 실제 저장소에서 확인
+- 필수 status check가 이름만으로 맞춰질 때, 같은 이름의 다른 workflow job이 성공 status를 낼 수 있는지
 - GitLab mirror(SSAFY)에서 같은 보호를 쓸 수 있는지
 - Windows·macOS·Linux에서 `ssh-keygen -Y sign/verify` 사용 가능 여부(D를 할 때)
+
+## 12. 신뢰 상태와 Team Mode 보장 범위(T94)
+
+### 12.1 상태
+
+| 상태 | 조건 | 사용자에게 하는 말 |
+|---|---|---|
+| `LOCAL` | `governance.yaml` 없음 | "Local Mode: 확정 기록은 실수 방지이며 인증이 아닙니다" |
+| `VERIFIED` | 지원 호스트에서 기본 branch 규칙을 읽었고 §2 W7·W9 대응 조건(승인 1건 이상, code owner 리뷰 필수, stale 승인 해제, 마지막 push 승인, force push·삭제 금지, 정책 경로 bypass 없음)이 모두 확인됨 | "호스트 보호 확인됨. agent 환경의 토큰 분리는 DUO가 확인할 수 없습니다" |
+| `NOT_MET` | 읽었지만 조건 중 하나 이상이 빠짐 | 빠진 조건 목록과 설정 위치 |
+| `UNVERIFIED` | 권한 부족, 오프라인, 미지원 호스트, API 오류, bypass 목록을 볼 수 없음 | "호스트 보호를 확인하지 못했습니다. 팀 권한을 보장한다고 표시하지 않습니다" |
+
+- 확인 결과는 시각과 함께 캐시하지 않고 매번 표시 시점에 다시 읽는다. 읽지 못하면 `UNVERIFIED`다.
+- 상태는 표시용이다. review·context 판정과 종료 코드를 바꾸지 않는다. CI의 `decision verify --ci`에서 `NOT_MET`을 실패로 할지는 저장소 설정으로 둔다(PROPOSED).
+
+### 12.2 보장하는 것(`VERIFIED`이고 §3 자격증명 전제를 사람이 지킨 경우)
+
+- 보호 branch에 들어간 Decision·정책 변경은 code owner인 인증된 호스팅 계정의 승인을 거쳤다.
+- 승인 뒤 바뀐 내용은 그 승인으로 병합되지 않는다(stale 승인 해제, 마지막 push 승인).
+- 병합된 이력은 force push로 지워지지 않는다.
+- 확정한 내용은 그 사람이 본 preview와 같다(`DECISION_CONFIRM_PREVIEW_CHANGED`, 기존).
+
+### 12.3 보장하지 않는 것
+
+- 승인한 계정 뒤에 사람이 있었는지(agent의 토큰 사용, 계정 탈취)
+- 저장소 관리자가 규칙을 끄거나 바꾸는 것
+- 병합 전 branch에서의 Decision 권한, 호스팅 밖 복사본
+- CI runner와 GitHub 자체의 무결성
+- 이벤트에 적힌 사유·label의 진실성
+
+## 13. 정책·CI 보호(T94)
+
+### 13.1 보호 대상 경로
+
+| 경로 | 약화되면 생기는 일 | 방어 | 한계 |
+|---|---|---|---|
+| `.github/workflows/**` | `pull_request` workflow는 PR 쪽 정의로 실행되므로, PR이 검증 job을 지우거나 항상 성공하게 바꿀 수 있다 | CODEOWNERS + 필수 code owner 리뷰. 필수 status check로 job 이름 고정(job이 사라지면 check가 오지 않아 병합 불가) | 같은 이름의 다른 job으로 check를 채우는 경로는 §11에서 확인 필요. 리뷰어가 놓치면 통과 |
+| CODEOWNERS | PR이 owner를 자기로 바꿔 자기 승인을 만듦 | CODEOWNERS 자체를 owner 대상에 넣음. 필수 owner는 base branch의 파일로 정해지는지 확인(§11) | 관리자 bypass |
+| `.duo-project/governance.yaml` | 자기를 APPROVER로 넣거나 Team Mode를 끔 | owner 대상. 끄는 것도 이 파일 변경이라 리뷰 대상 | 같음 |
+| `.duo-project/decisions/**`(이벤트 포함) | 위조 Decision, 이벤트 수정·삭제 | owner 대상. CI가 lock·이벤트·append-only를 검사(§14) | 리뷰어가 승인하면 들어감 |
+| Decision 검증 설정(workflow 안의 `duoctl` 버전 고정, lockfile) | 검사가 없는 옛 버전이나 다른 패키지로 바꿈 | 정확한 버전 고정(`@duo-director/cli@<version>`)과 lockfile을 owner 대상에 넣음 | 같음 |
+
+### 13.2 공격 경로
+
+1. PR이 workflow를 바꿔 verify를 건너뛴다.
+2. PR이 CODEOWNERS나 `governance.yaml`을 바꿔 자기 승인을 만든다.
+3. PR이 검증 버전을 낮추거나 패키지를 바꾼다.
+4. `pull_request_target`을 쓰는 workflow가 신뢰하지 않는 코드에 쓰기 토큰을 준다. DUO 예시 workflow는 `pull_request_target`을 쓰지 않는다.
+5. fork PR: 토큰은 읽기 전용이다. 리뷰 조회 권한이 fork PR에서 어떻게 동작하는지 §11에서 확인한다.
+6. 관리자 bypass나 관리자의 토큰을 가진 agent가 리뷰 없이 병합한다(W7, W8).
+
+### 13.3 DUO가 하는 일과 한계
+
+- `decision verify --ci`(PROPOSED)는 PR이 정책 경로를 바꾸면 그 사실을 결과 맨 위에 보고해, 리뷰어가 놓치지 않게 한다. 정책 변경 자체를 거부하지는 않는다. 정책을 정하는 것은 사람의 리뷰다.
+- DUO는 자기 검증이 실행되었는지 스스로 보장할 수 없다. 실행을 강제하는 것은 호스트의 필수 check와 code owner 리뷰다.
+
+### 13.4 DUO 저장소 ruleset 제안(적용하지 않음)
+
+현재(T84 적용): `next`는 승인 1·stale 해제·마지막 push 승인·3 OS check, code owner 리뷰 꺼짐. 모든 branch 규칙에 관리자 bypass(always). 저장소에 CODEOWNERS 없음.
+
+제안(별도 승인 뒤, T84처럼 임시 branch로 사전 검증):
+
+1. CODEOWNERS: `.github/`, `CODEOWNERS`, `.duo-project/`, `docs/conflicts.md`, `scripts/release/`에 maintainer와 지정 리뷰어 1명 이상
+2. `next-integration`: `require_code_owner_review: true`
+3. 정책 경로에는 bypass가 없도록, release용 bypass ruleset과 일반 PR 규칙을 나눈다. GitHub ruleset의 파일 경로 조건은 저장소 종류와 요금제에 따라 쓸 수 없을 수 있으므로 적용 전에 확인한다.
+4. 이 저장소의 작업 환경(maintainer 계정의 `gh` 인증을 쓰는 agent)을 승인·bypass 권한이 없는 토큰으로 바꾼다. 바꾸기 전에는 DUO 저장소 자체도 §3 자격증명 전제를 충족하지 않는다.
+
+## 14. 감사 이벤트 설계(T94 수정)
+
+### 14.1 저장
+
+- 위치: `.duo-project/decisions/events/<subject>/<eventId>.json`. `subject`는 `D-###` 또는 `P-…`. 이벤트 1건당 파일 1개다.
+- `eventId`: UTC 시각(밀리초)과 무작위 접미사. 파일 이름이 겹치지 않아 병렬 branch의 이벤트가 Git 충돌을 만들지 않는다.
+- 확장자는 `.json`이다. 0.3.3 loader가 `decisions/` 아래 `.yaml`·`.yml`을 Decision 원본으로 읽기 때문이다.
+- DecisionService만 쓴다. 한 번 쓴 파일은 고치지 않는다.
+
+### 14.2 필드(`duo.decision-event/1`, PROPOSED)
+
+| 필드 | 내용 |
+|---|---|
+| `eventId`, `at`, `op` | `op`: propose, confirm, reject, withdraw, supersede-mark, repair, confirm-failed, confirm-interrupted, adopt(§15) |
+| `subject` | Decision·proposal ID, supersede 대상 |
+| `actor` | `kind`, `label`(Git `user.name` 또는 `ui:` label), `surface`(cli, ui, mcp, session, repair). 인증이 아님 |
+| `reviewedDigest` | 확정한 사람이 본 preview digest(Approval Preview Digest) |
+| `lockDigest` | 확정 직후 Decision Lock digest |
+| `basedOn` | 이 이벤트를 쓸 때 같은 subject의 마지막 이벤트 ID(없으면 null) |
+| `prevHash` | `basedOn` 이벤트 파일의 SHA-256 |
+| `requestId` | 같은 요청 재시도의 중복 방지 |
+| `reason` | 선택, 2000자, 기존 secret redaction 적용 |
+| `diagnostics` | 실패·중단 이벤트의 진단 코드 |
+
+Git email은 기본으로 저장하지 않는다(commit 메타데이터에 이미 있다). 필요하면 `governance.yaml`의 opt-in으로만 넣는다. host 이름, 저장소 밖 경로, 환경 변수는 넣지 않는다.
+
+### 14.3 삭제·변경 탐지
+
+- CI(`decision verify --ci`): base 대비 `decisions/events/`의 기존 파일이 수정·삭제·이름 변경되면 실패한다(append-only).
+- 로컬(doctor, verify): 각 이벤트의 `basedOn`·`prevHash`가 가리키는 파일이 있고 해시가 맞는지 본다. 가운데가 빠지거나 바뀌면 보고한다.
+- 마지막 이벤트를 지우는 것은 내용만으로 알 수 없다. base와 비교하는 CI와 Git 이력이 잡는다.
+
+### 14.4 병렬 confirm·supersede와 stale 승인
+
+- 두 branch가 같은 proposal을 확정하거나 같은 Decision을 supersede하면, 두 이벤트의 `basedOn`이 같다.
+- CI는 PR의 새 이벤트마다 `basedOn`이 base에서 그 subject의 마지막 이벤트인지 확인한다. 아니면 **stale 승인**으로 실패한다. 먼저 병합된 쪽만 유효하고, 나중 쪽은 rebase한 뒤 다시 preview하고 다시 확정해야 한다(새 승인).
+- 같은 `D-###` 번호를 두 branch가 만들면 Decision 파일이 Git에서 충돌하거나, CI가 같은 ID의 확정 이벤트 두 개를 보고 실패한다.
+- 로컬의 기존 직렬화(decisions.lock, `PROPOSAL_NOT_PENDING`, `DECISION_SUPERSEDE_TARGET_INVALID`)는 그대로다.
+
+### 14.5 실패·중단 흐름
+
+| 상황 | 이벤트 |
+|---|---|
+| preview 뒤 내용 변경으로 거부(`DECISION_CONFIRM_PREVIEW_CHANGED`) | `confirm-failed` + 진단 |
+| 권한 거부(Team Mode) | `confirm-failed` + 진단 |
+| lock busy, 전송 오류, 입력 검증 실패 | 기록하지 않음(사용자 의도 전) |
+| Decision 파일은 썼지만 proposal 삭제·대상 표시 전에 중단 | 다음 쓰기 조작이 repair하며 `confirm-interrupted`와 `repair`를 남김 |
+| Decision 파일은 있지만 확정 이벤트가 없음 | Team Mode: `DECISION_EVENT_MISSING`(fail-closed). 사후에 만든 이벤트는 `repair`로 표시되고 확정 승인으로 치지 않으며, 리뷰된 병합을 다시 거쳐야 한다 |
+
+### 14.6 진정성·무결성·완전성
+
+| 성질 | 뜻 | 근거 | DUO 이벤트가 하는 일 | 한계 |
+|---|---|---|---|---|
+| 진정성 | 누가 승인했는가 | 호스팅의 code owner 리뷰(인증된 계정) | label·surface는 주장으로만 기록 | 계정 뒤의 사람은 증명하지 못함(W8) |
+| 무결성 | 병합 뒤 바뀌지 않았는가 | 보호 branch 이력(force push 금지)과 Git object hash | `prevHash` 체인과 append-only CI 검사로 바뀐 이벤트를 찾음 | 체인은 서명이 아니다. 쓰기 권한자는 병합 전에 체인 전체를 다시 만들 수 있다 |
+| 완전성 | 빠진 이벤트가 없는가 | Team Mode의 fail-closed 규칙 | 확정 Decision마다 확정 이벤트 요구, 실패·중단을 가능한 범위에서 기록 | push하지 않은 로컬 조작, 기록하지 않기로 한 실패, 지워진 마지막 이벤트(CI 밖)는 보이지 않음 |
+
+이벤트 해시 체인은 서명도 독립 신뢰 기관도 아니다. 이벤트를 "누가 언제 무엇을 보고 승인했다는 기록"으로 쓰되, 신뢰는 리뷰된 병합에서 온다.
+
+## 15. 기존 저장소의 Team Mode 전환(T94)
+
+### 15.1 켜지는 시점
+
+- 한 commit에서 `governance.yaml`이 있고 `mode: team`이면 그 commit은 Team Mode 규칙으로 읽힌다(로컬 검사).
+- **팀 권한은 bootstrap PR이 보호 branch에 병합된 commit부터 생긴다.** 그 전의 branch는 로컬 검사만 받는다.
+- Team Mode를 끄는 것도 `governance.yaml` 변경이라 code owner 리뷰 대상이다. 끈 뒤에도 이벤트 파일은 남는다.
+
+### 15.2 Bootstrap PR
+
+1. `governance.yaml`, CODEOWNERS 변경, CI 검증 단계를 추가한다.
+2. 기존 확정·대체·거절 Decision마다 `adopt` 이벤트 1건(현재 상태와 `lockDigest`)을 만든다(`duoctl decision adopt`, PROPOSED).
+3. 이 PR의 code owner 승인이 **기존 Decision의 현재 내용에 대한 신뢰 출발점**이다. 과거 이력을 승인한 것은 아니다.
+
+### 15.3 기존 파일 검증
+
+| 기존 상태 | 처리 |
+|---|---|
+| lock이 유효한 확정 Decision | `adopt` 이벤트에 `lockDigest` 기록 |
+| lock이 없는 확정 Decision(ADR-013 수동 fallback) | bootstrap 실패. proposal로 되돌려 정상 확정 흐름을 거치거나, 사람이 `decision adopt`로 lock을 만들고 그 PR에서 리뷰받는다 |
+| lock 불일치·lifecycle 무결성 오류(H-82 검사) | bootstrap 실패. 기존 0.3.1 진단 그대로 |
+| superseded·rejected | 상태 그대로 `adopt`. 사슬은 기존 H-82 검사 |
+| proposal | 이벤트 없이 그대로. 다음 조작부터 기록 |
+
+### 15.4 실패와 불완전한 이력
+
+- bootstrap 검증이 실패하면 CI가 PR을 막고 Team Mode는 켜지지 않는다. 일부만 켜진 상태는 없다.
+- Team Mode 이전의 이력은 만들어 내지 않는다. 이력 조회(API-04)는 파일에서 추론한 항목을 `derived: true`와 "Team Mode 이전"으로 표시한다.
+- 전환 뒤 이벤트가 빠진 확정 Decision은 `DECISION_EVENT_MISSING`으로 authority 조작이 멈춘다. 복구는 `repair` 이벤트를 담은 PR을 code owner가 리뷰해 병합하는 것이다.
+
+### 15.5 호환성
+
+| 대상 | 영향 |
+|---|---|
+| Decision Lock | 형식·digest 대상 필드 그대로. 이벤트는 digest를 복사해 둘 뿐 |
+| Project Truth | 선택 파일 `governance.yaml`과 `decisions/events/` 추가. 기존 파일 의미 그대로 |
+| 공개 `/1` 형식 | Decision·Proposal·Review·Context·Record 그대로. 새 형식 `duo.governance/1`, `duo.decision-event/1` 추가 |
+| 0.3.3 클라이언트 | 두 새 파일을 읽지 않고 Local Mode로 동작(§8). 팀 권한은 병합 리뷰가 지킨다 |
+| MCP | 9개 tool 그대로. 확정 도구 없음 |
 

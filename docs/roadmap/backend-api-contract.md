@@ -1,4 +1,4 @@
-# Backend API 계약(로컬 UI 서버, T87)
+# Backend API 계약(로컬 UI 서버, T87, T94 수정)
 
 대상: `duoctl ui`가 띄우는 로컬 HTTP 서버(`packages/integration/src/http/server.ts`)와 FE(`packages/ui`). 표시 규칙:
 
@@ -51,10 +51,10 @@
 
 | ID | Method·Path | Request | Response(data) | 오류 | 권한 | Side effect | 멱등성·동시성 | 의존 |
 |---|---|---|---|---|---|---|---|---|
-| API-01 | GET `/api/me` → `duo.ui.me/1` | 없음 | `{ mode: "local"\|"team", actor: { kind: "human", label, source: "git-user-name", authenticated: false }, git: { name, email? }, roles[], capabilities: { confirm, reject, withdraw }, agentEnvironment: { detected, markers[] } }`. 각 capability는 `{ allowed, reason?, enforcement: "local-ux" \| "merge-review" }` | 세션 오류 | 세션 | 없음 | 예 | Local 부분은 BE-GOV-06, Team 부분은 H-88 |
+| API-01 | GET `/api/me` → `duo.ui.me/1` | 없음 | `{ mode: "local"\|"team", actor: { kind: "human", label, source: "git-user-name", authenticated: false }, git: { name, email? }, roles[], capabilities: { confirm, reject, withdraw }, agentEnvironment: { detected, markers[] }, trust: TrustStatus }`. 각 capability는 `{ allowed, reason?, enforcement: "local-ux" \| "merge-review" }`. `trust`는 §7의 `TrustStatus`(T94) | 세션 오류 | 세션 | 없음 | 예. `trust`는 호출 때마다 다시 확인하고, 못 하면 `UNVERIFIED` | Local 부분은 BE-GOV-06, Team 부분과 `trust`는 H-88 |
 | API-02 | GET `/api/decisions` → `duo.ui.decisions/1` | `state?`, `q?` | `{ decisions: [{ id, title, state, authority: "CONFIRMED"\|"SUPERSEDED"\|..., locked, lockStatus, supersedes, supersededBy, proposalId?, confirmedAt?, confirmedBy?, origin: "lifecycle"\|"manual" }] }` | 도메인 실패 | 세션 | 없음 | 예 | 없음(현재 데이터로 가능) |
 | API-03 | GET `/api/decisions/{D-id}` | 없음 | API-02 항목 + `lock: LockVerification`, `chain: [{id, state}]`(대체 사슬), `location` | 404 대신 `data.status: "not-found"` | 세션 | 없음 | 예 | 없음 |
-| API-04 | GET `/api/decisions/{D-id}/history` → `duo.ui.decision-history/1` | 없음 | `{ events: DecisionEvent[], derived: boolean, integrity: { chain: "valid"\|"broken"\|"absent" } }`. 이벤트가 없으면 파일에서 추론한 항목을 `derived: true`로 | 같음 | 세션 | 없음 | 예 | BE-AUD-01·05(H-88) |
+| API-04 | GET `/api/decisions/{D-id}/history` → `duo.ui.decision-history/1` | 없음 | `DecisionHistoryData`(§7): 이벤트와 파일에서 추론한 항목(`derived: true`), 체인 상태, Team Mode 시작 시점. 표시 규칙은 §9 | 같음 | 세션 | 없음 | 예 | BE-AUD-01·05(H-88) |
 | API-05 | GET `/api/proposals/{P-id}/preview` → `duo.ui.preview/1` | 없음 | `ConfirmPreview` | `PROPOSAL_NOT_FOUND`, `PROPOSAL_NOT_PENDING` | 세션 | 없음 | 예 | 없음 |
 | API-06 | POST `/api/proposals/{P-id}/confirm`에 `reason?` 추가 | `{ confirmId, previewDigest, reason? }`(최대 2000자) | 지금과 같음 + `eventId?` | 지금과 같음 + Team Mode `DECISION_ROLE_FORBIDDEN`, `DECISION_AGENT_ENVIRONMENT` | 세션 + CSRF + (Team) 승인자 | 이벤트 1건 추가 | digest 바인딩 유지. 같은 요청 재시도는 `PROPOSAL_NOT_PENDING`이고 이벤트를 더 만들지 않음 | BE-AUD-02, H-88 |
 | API-07 | POST `/api/proposals/{P-id}/withdraw` | `{ reason? }` | `{ status: "withdrawn", result }` | `PROPOSAL_NOT_PENDING`, `PROPOSAL_WITHDRAW_FORBIDDEN` | 세션 + CSRF, 제안자 또는 ADMIN(로컬 UX) | proposal 파일에 withdrawn 기록(스키마 확장 필요) + 이벤트 | 두 번째는 `PROPOSAL_NOT_PENDING` | 스키마 변경이라 H-88 |
@@ -99,42 +99,70 @@ PROPOSED(도메인, 같은 방식): `DECISION_ROLE_FORBIDDEN`(Team Mode, 범위 
 
 ## 7. FE용 타입(PROPOSED, mock 작업용)
 
+T94에서 감사 이벤트 설계(rbac 설계 §14)와 신뢰 상태(§12)에 맞춰 고쳤다. 모두 PROPOSED이며 구현되지 않았다.
+
 ```ts
 export type Enforcement = "local-ux" | "merge-review";
 export interface Capability { readonly allowed: boolean; readonly reason?: string; readonly enforcement: Enforcement }
+export type TrustState = "LOCAL" | "VERIFIED" | "NOT_MET" | "UNVERIFIED";
+export interface TrustStatus {
+  readonly state: TrustState;
+  readonly host: "github" | "unsupported" | "unknown";
+  readonly checkedAt?: string;
+  /** Conditions that are missing (NOT_MET) or could not be read (UNVERIFIED). */
+  readonly reasons: readonly string[];
+  /** DUO never verifies that agents lack approval credentials; always false. */
+  readonly credentialSeparationVerified: false;
+}
 export interface MeData {
   readonly mode: "local" | "team";
   readonly actor: { readonly kind: "human"; readonly label: string; readonly source: "git-user-name"; readonly authenticated: false };
-  readonly git: { readonly name: string | null; readonly email?: string | null };
+  readonly git: { readonly name: string | null };
   readonly roles: readonly ("ADMIN" | "APPROVER" | "DEVELOPER" | "AI_AGENT" | "READ_ONLY")[];
   readonly capabilities: { readonly confirm: Capability; readonly reject: Capability; readonly withdraw: Capability };
   readonly agentEnvironment: { readonly detected: boolean; readonly markers: readonly string[] };
+  readonly trust: TrustStatus;
 }
+export type DecisionEventOp =
+  | "propose" | "confirm" | "reject" | "withdraw" | "supersede-mark" | "repair"
+  | "confirm-failed" | "confirm-interrupted" | "adopt";
 export interface DecisionEvent {
   readonly format: "duo.decision-event/1";
   readonly eventId: string;
   readonly at: string;
-  readonly op: "propose" | "confirm" | "reject" | "withdraw" | "supersede-mark" | "repair" | "confirm-failed";
-  readonly decisionId?: string;
-  readonly proposalId?: string;
+  readonly op: DecisionEventOp;
+  readonly subject: { readonly decisionId?: string; readonly proposalId?: string; readonly supersedes?: string };
   readonly actor: { readonly kind: "human" | "agent" | "system"; readonly label: string; readonly surface: "cli" | "ui" | "mcp" | "session" | "repair" };
-  readonly git?: { readonly name: string | null; readonly email: string | null };
   readonly reviewedDigest?: string;
   readonly lockDigest?: string;
+  readonly basedOn: string | null;
+  readonly prevHash: string | null;
+  readonly requestId?: string;
   readonly reason?: string;
-  readonly supersedes?: string;
   readonly diagnostics?: readonly string[];
-  readonly prev?: string;
+}
+export interface TimelineEntry {
+  readonly at: string;
+  readonly op: DecisionEventOp | "derived-confirm" | "derived-supersede";
+  readonly actorLabel: string | null;
+  readonly surface: string | null;
+  readonly derived: boolean;
+  readonly reviewedDigest?: string;
+  readonly reason?: string;
+  readonly problem?: "chain-broken" | "event-missing" | "repair-only";
 }
 export interface DecisionHistoryData {
   readonly id: string;
+  readonly mode: "local" | "team";
+  readonly teamModeSince?: string;
+  readonly entries: readonly TimelineEntry[];
   readonly events: readonly DecisionEvent[];
-  readonly derived: boolean;
-  readonly integrity: { readonly chain: "valid" | "broken" | "absent" };
+  readonly integrity: { readonly chain: "valid" | "broken" | "absent"; readonly missingConfirm: boolean };
 }
 ```
 
-FE는 이 타입으로 mock을 만들어 화면(Jira S15P31A106-311·312·315·316)을 먼저 개발할 수 있다. 백엔드가 API-01·04를 구현하면 mock을 실제 호출로 바꾼다.
+FE는 이 타입으로 mock을 만들어 화면(Jira S15P31A106-311·312·315·316)을 먼저 개발할 수 있다. 백엔드가 API-01·04를 구현하면 mock을 실제 호출로 바꾼다. Git email은 기본 응답에 없다(opt-in, rbac 설계 §14.2).
+
 
 ## 8. 표면별 대응
 
@@ -147,4 +175,58 @@ FE는 이 타입으로 mock을 만들어 화면(Jira S15P31A106-311·312·315·3
 | 거절 | `decision reject --reason` | `POST .../reject` | **없음(유지)** |
 | 이력 | PROPOSED `decision history` | API-04 PROPOSED | `duo_get_decision`에 이력 요약 추가는 AI-2와 협의(스키마 additive) |
 | 검증 | PROPOSED `decision verify [--ci]` | 없음 | 없음 |
+
+## 9. 역할별 접근(PROPOSED, Team Mode)
+
+Local Mode에서는 지금처럼 세션을 가진 같은 컴퓨터의 사용자가 UI가 제공하는 모든 조작을 한다. 아래 표는 Team Mode의 제안이다. **로컬 서버가 보는 역할은 Git `user.name`/`user.email` 같은 인증되지 않은 label에서 나오므로 실수 방지(`local-ux`)일 뿐이다.** 실제 강제는 병합 리뷰(`merge-review`)다.
+
+| 조작(엔드포인트) | READ_ONLY | DEVELOPER | APPROVER(자기 범위) | 강제 |
+|---|---|---|---|---|
+| 조회(`GET` 전부, API-02~05 포함) | O | O | O | 없음 |
+| Context·Review 실행(`POST /api/context`, `/api/review`) | O | O | O | 없음(읽기 조작) |
+| proposal 확정(`POST …/confirm`) | X | X | O | 로컬 거부 `DECISION_ROLE_FORBIDDEN` + 병합 리뷰 |
+| proposal 거절(`POST …/reject`) | X | X | O | 같음 |
+| proposal 취소(API-07) | X | 자기 것 | 자기 것 | 로컬 |
+
+- READ_ONLY는 원래 저장소 쓰기 권한이 없는 사람이다. 로컬 UI는 그것을 알 수 없으므로, READ_ONLY 표시는 `governance.yaml` 매핑에서 나온 안내다.
+- 권한 부족은 지금 계약대로 HTTP 200 + `failed`다(§5).
+
+## 10. 승인 실패와 충돌의 화면 표현
+
+| 코드 | 상태 | 화면에 보일 것 | 사용자의 다음 행동 |
+|---|---|---|---|
+| `DECISION_CONFIRM_PREVIEW_CHANGED` | IMPLEMENTED | "확인한 뒤 내용이 바뀌어 아무것도 쓰지 않았습니다" | 새 preview를 보고 다시 확정 |
+| `PROPOSAL_NOT_PENDING` | IMPLEMENTED | "이미 처리된 proposal입니다(D-### 또는 rejected)" | 목록 새로 고침 |
+| `DECISION_LOCK_BUSY` | IMPLEMENTED | "다른 확정 작업이 진행 중입니다" | 잠시 뒤 재시도 |
+| `DECISION_SUPERSEDE_TARGET_INVALID` | IMPLEMENTED | "대체할 Decision이 이미 바뀌었습니다" | 대상 확인 뒤 새 proposal |
+| `DECISION_SESSION_CONFLICT` | IMPLEMENTED(CLI 세션) | 같은 대상의 두 proposal | 하나만 확정 |
+| `PROPOSAL_STALE`(warning) | IMPLEMENTED | "Truth가 바뀐 뒤의 proposal입니다" 배지 | preview 확인 |
+| `UI_CONFIRM_ID_MISMATCH` | IMPLEMENTED | "확정할 ID를 다시 입력하세요" | ID 재입력 |
+| Truth 권한 오류(`DECISION_INTEGRITY_INVALID` 등) | IMPLEMENTED | 확정 버튼 비활성, 원인 진단 | doctor 안내 |
+| `DECISION_ROLE_FORBIDDEN` | PROPOSED | "이 범위의 승인자가 아닙니다(실수 방지)" | 승인자에게 요청 |
+| `DECISION_AGENT_ENVIRONMENT` | PROPOSED | "agent 실행 환경에서는 확정하지 않습니다(실수 방지)" | 사람의 터미널·브라우저에서 확정 |
+| `DECISION_EVENT_MISSING`, `DECISION_TEAM_LOCK_REQUIRED` | PROPOSED | Team Mode 무결성 오류 | 전환·repair 절차 안내 |
+| stale 승인(같은 `basedOn`) | PROPOSED, CI 전용 | UI에는 없음. PR의 CI 결과에 나옴 | rebase 뒤 다시 확정 |
+
+## 11. Audit Timeline 표시 데이터
+
+- 한 줄 = `TimelineEntry` 하나. 시각, 조작, actor label, 표면, 본 preview digest(앞 12자), 사유.
+- actor label 옆에는 항상 "인증 아님" 표시를 둔다. Team Mode에서 병합 리뷰어 정보는 DUO가 아니라 호스팅의 PR 화면에 있다. UI는 PR 링크를 보여 주지 않는다(DUO가 PR을 알지 못함).
+- `derived: true` 항목은 "파일에서 추론, Team Mode 이전"으로 구분해 표시하고 확정 승인처럼 보이게 하지 않는다.
+- `problem`이 있으면 줄을 경고 색으로 표시한다(`chain-broken`, `event-missing`, `repair-only`).
+- 상단에 `TrustStatus`를 보여 준다. `UNVERIFIED`·`NOT_MET`이면 "팀 권한이 보장된다고 표시하지 않습니다"를 함께 쓴다.
+
+## 12. 프론트엔드가 Mock으로 먼저 할 수 있는 범위
+
+| 범위 | Mock 가능 | 근거 |
+|---|---|---|
+| Decision 목록·상세(API-02·03) | O | 지금 데이터로 계산 가능, HD 불필요 |
+| 단건 preview(API-05) | O | 기존 `ConfirmPreview` 형식 |
+| 오류 표현(§10의 IMPLEMENTED 코드) | O, 실제 서버로도 확인 가능 | 지금 서버가 냄 |
+| `/api/me`와 신뢰 상태 배지(API-01) | O(mock만) | 필드 이름은 H-88 뒤 확정 |
+| Audit Timeline(API-04) | O(mock만) | 이벤트 형식은 H-88 뒤 확정 |
+| 역할별 버튼 비활성(§9) | O(mock만) | Team Mode 미구현 |
+| proposal 생성·취소(API-07·08) | 하지 않음 | 스키마·ADR-009 변경 필요 |
+
+Mock 화면은 "PROPOSED" 표시를 달고, 실제 구현된 기능처럼 문서나 데모에 쓰지 않는다.
 
