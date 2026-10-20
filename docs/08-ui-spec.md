@@ -20,6 +20,8 @@ UI에서 허용하는 쓰기는 Human의 Decision Proposal **Confirm**과 **Reje
 | GET | `/api/proposals` | DecisionService의 pending/committed/rejected logical state |
 | GET | `/api/graph?node=&kind=trace\|impact&depth=` | 기존 bounded trace/impact operation (기본 200 node) |
 | GET | `/api/entity/:id` | Truth/Graph entity 상세와 source slice |
+| GET | `/api/decisions?state=&q=` | `duo.ui.decisions/1`(BE-API-02, T95). 모든 Decision을 ID 순으로: `authority`(CONFIRMED·SUPERSEDED·REJECTED·PROPOSED), `lockStatus`(`verifyDecisionLock`: valid·missing·mismatch·not-confirmed), `origin`(lock 있는 확정 = `lifecycle`, lock 없는 확정 = `manual`, 미확정 = null), `supersedes`·`supersededBy`, 파일에 있을 때만 `proposalId`·`confirmedAt`·`confirmedBy`(label), Decision별 `integrity`와 `problems`, 위치. `truth: { complete, problems }`는 loader의 error 진단이고, `complete: false`이면 review·context·확정이 거부된다. `actorLabelsAuthenticated: false`. `state`는 proposed·confirmed·superseded·rejected, `q`는 ID·제목의 대소문자 무시 부분 일치(1~200자), 그 밖의 query는 400 |
+| GET | `/api/decisions/:id` | `duo.ui.decision-detail/1`(BE-API-02). `status: found`이면 목록 항목에 question·answer·rationale·governs·forbids, 파일에 있을 때 proposedAt·proposedBy(label)·proposedByKind, `lock`(`id, status, expected, recorded?`), `chain`(대체 사슬, 오래된 것부터, 없는 ID는 `missing`, 순환은 `loop`)을 더한다. 없는 ID는 `status: not-found`와 `truth`. ID 형식이 아니거나 인코딩이 깨지면 400 `UI_REQUEST_INVALID` |
 | GET | `/api/reviews`, `/api/reviews/:id` | Human 보존 Review Record와 Evidence pointer |
 | GET | `/api/search?q=&limit=` | 기존 deterministic evidence search |
 | GET | `/api/source?path=&start=&end=` | 인덱싱된 파일의 필요한 줄, 최대 120줄 |
