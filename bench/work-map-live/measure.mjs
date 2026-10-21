@@ -52,7 +52,7 @@ try {
   await page.locator(".work-detail").getByRole("heading", { name: `[Codex] ${name}` }).waitFor();
 
   started = Date.now();
-  recordWorkReview(root, sessionId, name, { digest: "live-graph-probe", verdict: "ASK", claimCount: 1 }, new Date());
+  recordWorkReview(root, sessionId, task?.id ?? "", { digest: "live-graph-probe", verdict: "ASK", claimCount: 1 }, new Date());
   await page.getByText("Review ASK · 1 claims").waitFor({ timeout: 30_000 });
   timings.reviewVisibleMs = Date.now() - started;
 

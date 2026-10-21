@@ -215,6 +215,54 @@ describe("existing project through MCP: freshness, CLI parity, WAL, metrics, pro
   });
 });
 
+describe("Work map activity does not change MCP results", () => {
+  const p = existingProject(temps);
+  let s: McpSession;
+  const activity = path.join(p.root, ".duo-project", "runtime", "work-tasks.json");
+  beforeAll(async () => {
+    expect(duoctl(p.root, ["init", "--non-interactive", "--answers", "-", "--json"],
+      JSON.stringify([{ question: "project_goal", value: "Keep recurring chores fair." }])).code).toBe(0);
+    s = await open(p.root);
+  });
+
+  it("preserves successful context and review responses when activity storage is malformed or unreadable", async () => {
+    fs.mkdirSync(path.dirname(activity), { recursive: true });
+    fs.writeFileSync(activity, "{malformed", "utf8");
+    const context = await s.call("duo_get_context", { task: "Scheduler.next" });
+    expect(context.isError).toBeFalsy();
+    expect(context.structuredContent).toEqual(duoctl(p.root, ["context", "Scheduler.next", "--json"]).json().result);
+
+    fs.rmSync(activity);
+    fs.mkdirSync(activity);
+    const review = await s.call("duo_review_changes", { task: "Scheduler.next" });
+    expect(review.isError).toBeFalsy();
+    expect(review.structuredContent).toEqual(duoctl(p.root, ["review", "--task", "Scheduler.next", "--json"]).json().result);
+    fs.rmSync(activity, { recursive: true });
+  });
+
+  it("attaches free-form reviews by session and full task identity, even when display names match", async () => {
+    const first = "Investigate an unmapped workflow\nvariant alpha";
+    const second = "Investigate an unmapped workflow\nvariant beta";
+    expect((await s.call("duo_get_context", { task: first })).isError).toBeFalsy();
+    expect((await s.call("duo_get_context", { task: second })).isError).toBeFalsy();
+    const tasks = () => (JSON.parse(fs.readFileSync(activity, "utf8")) as { tasks: {
+      id: string; name: string; targetRef?: string; taskKey?: string; review?: { digest: string };
+    }[] }).tasks.filter((t) => t.name === "Investigate an unmapped workflow");
+    expect(tasks()).toHaveLength(2);
+    expect(new Set(tasks().map((t) => t.id)).size).toBe(2);
+    expect(new Set(tasks().map((t) => t.taskKey)).size).toBe(2);
+    expect(tasks().every((t) => t.targetRef === undefined)).toBe(true);
+
+    const reviewed = await s.call("duo_review_changes", { task: second });
+    expect(reviewed.isError).toBeFalsy();
+    expect(tasks().filter((t) => t.review !== undefined)).toHaveLength(1);
+    const secondKey = tasks().find((t) => t.review !== undefined)?.taskKey;
+    expect(secondKey).toBe(tasks()[1]?.taskKey);
+    expect((await s.call("duo_review_changes", { task: first })).isError).toBeFalsy();
+    expect(tasks().every((t) => t.review !== undefined)).toBe(true);
+  });
+});
+
 describe("Truth lookups and dirty-baseline Review provenance through MCP (TASK-016)", () => {
   const LEGACY = "/** Kept from before DUO. */\nexport class LegacySessionStore {\n  private readonly sessions = new Map<string, string>();\n\n  save(token: string, userId: string): void {\n    this.sessions.set(token, userId);\n  }\n}\n";
   const SERVER = "export class ServerSessionStore {\n  keep(token: string): string {\n    return token;\n  }\n}\n";

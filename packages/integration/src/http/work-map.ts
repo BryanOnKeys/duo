@@ -73,6 +73,8 @@ export interface WorkTask {
   readonly issueId?: string;
   readonly targetRef?: string;
   readonly duoSessionId?: string;
+  /** Hash of the full task text; distinguishes tasks with the same display name. */
+  readonly taskKey?: string;
   readonly worktreeId?: string;
   readonly identitySource?: "duo" | "manual" | "legacy";
   readonly startedAt?: string;
@@ -219,43 +221,40 @@ export function touchWorkTask(root: string, agent: string, taskText: string, now
   const safeAgent = agent.trim().slice(0, 80) || "Agent";
   return withTaskLock(root, () => {
     const tasks = readTasks(root);
-    const id = identity?.targetRef === undefined ? undefined : (() => {
-      const digest = createHash("sha1").update(`${identity.duoSessionId}\0${identity.targetRef}`).digest();
+    const taskKey = identity === undefined ? undefined : createHash("sha256").update(taskText).digest("hex").slice(0, 32);
+    const id = identity === undefined ? undefined : (() => {
+      const digest = createHash("sha1").update(`${identity.duoSessionId}\0${identity.targetRef ?? `task:${taskKey}`}`).digest();
       digest[6] = ((digest[6] ?? 0) & 0x0f) | 0x50;
       digest[8] = ((digest[8] ?? 0) & 0x3f) | 0x80;
       const hex = digest.subarray(0, 16).toString("hex");
       return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     })();
-    const sameName = identity === undefined ? [] : tasks.filter((t) => t.status !== "completed" &&
-      t.duoSessionId === identity.duoSessionId && t.name === name);
-    const provisional = id === undefined ? undefined : sameName.filter((t) => t.targetRef === undefined);
-    const current = tasks.find((t) => t.status !== "completed" && (id === undefined
-      ? identity === undefined ? t.agent === safeAgent && t.name === name : sameName.length === 1 && t.id === sameName[0]?.id
-      : t.id === id || (t.duoSessionId === identity?.duoSessionId && t.targetRef === identity?.targetRef) ||
-        (provisional?.length === 1 && t.id === provisional[0]?.id)));
+    const current = tasks.find((t) => t.status !== "completed" && (identity === undefined
+      ? t.agent === safeAgent && t.name === name
+      : t.duoSessionId === identity.duoSessionId && (t.id === id || t.taskKey === taskKey ||
+        (identity.targetRef !== undefined && t.targetRef === identity.targetRef))));
     if (current === undefined) {
       const task: WorkTask = { id: id ?? randomUUID(), agent: safeAgent, name,
         ...(identity === undefined ? { identitySource: "legacy" as const } : { identitySource: "duo" as const, duoSessionId: identity.duoSessionId,
-          ...(identity.targetRef === undefined ? {} : { targetRef: identity.targetRef }) }),
+          ...(taskKey === undefined ? {} : { taskKey }), ...(identity.targetRef === undefined ? {} : { targetRef: identity.targetRef }) }),
         worktreeId: worktreeId(root), startedAt: now.toISOString(), updatedAt: now.toISOString(), status: "active" };
       saveTasks(root, [...tasks, task]);
       return task;
     }
-    const updated: WorkTask = { ...current, name, ...(identity?.targetRef === undefined ? {} : { targetRef: identity.targetRef }),
+    const updated: WorkTask = { ...current, name, ...(taskKey === undefined ? {} : { taskKey }),
+      ...(identity?.targetRef === undefined ? {} : { targetRef: identity.targetRef }),
       updatedAt: now.toISOString(), status: "active" };
     saveTasks(root, tasks.map((t) => t.id === current.id ? updated : t));
     return updated;
   });
 }
 
-export function recordWorkReview(root: string, duoSessionId: string, taskText: string,
+export function recordWorkReview(root: string, duoSessionId: string, taskId: string,
   review: { readonly digest: string; readonly verdict?: string; readonly claimCount: number }, now: Date): void {
   withTaskLock(root, () => {
-    const name = taskText.split(/\r?\n/u)[0]?.trim().slice(0, 200);
     const tasks = readTasks(root);
-    const matching = tasks.filter((t) => t.duoSessionId === duoSessionId && t.name === name && t.targetRef !== undefined && t.status === "active");
-    if (matching.length !== 1) return;
-    const current = matching[0] as WorkTask;
+    const current = tasks.find((t) => t.id === taskId && t.duoSessionId === duoSessionId && t.status === "active");
+    if (current === undefined) return;
     saveTasks(root, tasks.map((t) => t.id === current.id ? { ...t,
       review: { ...review, observedAt: now.toISOString() }, updatedAt: now.toISOString() } : t));
   });

@@ -161,7 +161,7 @@ describe("DUO UI in a browser (T18.1)", () => {
     })()`);
 
     const reviewStart = Date.now();
-    recordWorkReview(r.root, session, name, { digest: "live-graph-review", verdict: "ASK", claimCount: 2 }, new Date());
+    recordWorkReview(r.root, session, task?.id ?? "", { digest: "live-graph-review", verdict: "ASK", claimCount: 2 }, new Date());
     try { await page.getByText("Review ASK · 2 claims").waitFor({ timeout: liveUpdateTimeoutMs }); }
     catch (error) {
       const currentMap = await page.evaluate("fetch('/api/work-map').then(r => r.json()).then(r => r.data)") as { nodes?: { type: string; review?: unknown }[] };

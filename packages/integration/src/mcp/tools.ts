@@ -117,6 +117,15 @@ export interface ToolContext {
   readonly llm: LLMProviderPool;
   /** The server's in-memory repository token counts (TASK-019): same context metrics, less rereading. */
   readonly tokenCounts?: TokenCountMemo;
+  readonly log?: (line: string) => void;
+}
+
+function recordActivity(ctx: ToolContext, action: () => void): void {
+  try { action(); }
+  catch (error) {
+    // Work map persistence is auxiliary: never replace a successful MCP result with its failure.
+    try { ctx.log?.(`duo work activity: ${(error as Error).message}`); } catch { /* logging is auxiliary too */ }
+  }
 }
 
 export interface ToolDefinition<N extends ToolName> {
@@ -179,8 +188,8 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
         const explicit = candidates.filter((s) => s.match === "id");
         const targetRef = explicit.length === 1 ? explicit[0]?.id : explicit.length > 1 ? undefined
           : candidates.length === 1 ? candidates[0]?.id : undefined;
-        touchWorkTask(ctx.root, ctx.agentName, args.task, new Date(), ctx.duoSessionId === undefined ? undefined
-          : { duoSessionId: ctx.duoSessionId, ...(targetRef === undefined ? {} : { targetRef }) });
+        recordActivity(ctx, () => { touchWorkTask(ctx.root, ctx.agentName, args.task, new Date(), ctx.duoSessionId === undefined ? undefined
+          : { duoSessionId: ctx.duoSessionId, ...(targetRef === undefined ? {} : { targetRef }) }); });
       }
       const p = op.kind === "ok" ? op.payload : undefined;
       return { op, metric: { status: p?.status ?? op.kind, ...(p?.context.packet === undefined ? {} : { contextTokens: p.context.packet.metrics.budget.used, contextBudget: p.context.packet.metrics.budget.total }), llmCalls: 0 } };
@@ -204,11 +213,13 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
       }, { signal: ctx.signal, llm: ctx.llm, ...(ctx.tokenCounts === undefined ? {} : { tokenCounts: ctx.tokenCounts }) });
       if (op.kind === "ok" && args.task !== undefined) {
         const at = new Date();
-        touchWorkTask(ctx.root, ctx.agentName, args.task, at,
-          ctx.duoSessionId === undefined ? undefined : { duoSessionId: ctx.duoSessionId });
-        if (ctx.duoSessionId !== undefined && op.payload.diff !== undefined) recordWorkReview(ctx.root, ctx.duoSessionId, args.task,
-          { digest: op.payload.diff.identity, ...(op.payload.verdict === undefined ? {} : { verdict: op.payload.verdict }),
-            claimCount: op.payload.claims.length }, at);
+        recordActivity(ctx, () => {
+          const task = touchWorkTask(ctx.root, ctx.agentName, args.task as string, at,
+            ctx.duoSessionId === undefined ? undefined : { duoSessionId: ctx.duoSessionId });
+          if (task !== undefined && ctx.duoSessionId !== undefined && op.payload.diff !== undefined) recordWorkReview(ctx.root, ctx.duoSessionId, task.id,
+            { digest: op.payload.diff.identity, ...(op.payload.verdict === undefined ? {} : { verdict: op.payload.verdict }),
+              claimCount: op.payload.claims.length }, at);
+        });
       }
       const r = op.kind === "ok" ? op.payload : undefined;
       return { op, metric: { status: r?.status ?? op.kind, ...(r?.verdict === undefined ? {} : { reviewVerdict: r.verdict }), ...(r === undefined ? {} : { reviewClaims: r.claims.length, ...reviewLlmMetric(r) }) } };
