@@ -135,6 +135,20 @@ describe("GET /api/proposals/{id}/preview (BE-API-05)", () => {
     expect(git(c.root, "status", "--porcelain")).toBe("");
   });
 
+  it("a changed proposal file changes the digest, and restoring the file restores it", async () => {
+    const original = (await preview("P-002")).preview?.digest;
+    const file = path.join(c.root, ".duo-project/decisions/proposals/P-002.yaml");
+    const text = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, text.replace("answer: sqlite", "answer: duckdb"));
+    const edited = await preview("P-002");
+    expect(edited.preview?.candidate).toMatchObject({ answer: "duckdb" });
+    expect(edited.preview?.digest).not.toBe(original);
+    fs.writeFileSync(file, text);
+    expect((await preview("P-002")).preview?.digest).toBe(original);
+    expect(git(c.root, "status", "--porcelain")).toBe("");
+  });
+
+
   it("a confirmed, rejected or unknown proposal fails with the service's code; a malformed ID, other methods and no session are refused", async () => {
     expect((await preview("P-001")).diagnostics?.map((d) => d.code)).toEqual(["PROPOSAL_NOT_PENDING"]);
     expect((await preview("P-003")).diagnostics?.map((d) => d.code)).toEqual(["PROPOSAL_NOT_PENDING"]);
@@ -163,6 +177,11 @@ describe("GET /api/proposals/{id}/preview (BE-API-05)", () => {
     expect(snapshot(c.root)).toEqual(before);
     const done = (await post(c, "/api/proposals/P-002/confirm", { confirmId: "P-002", previewDigest: fresh.preview?.digest })).json().data as { status: string; result: { decisionId: string } };
     expect(done).toMatchObject({ status: "confirmed", result: { decisionId: "D-002" } });
+    const afterConfirm = snapshot(c.root);
+    const again = (await post(c, "/api/proposals/P-002/confirm", { confirmId: "P-002", previewDigest: fresh.preview?.digest })).json().data as { status: string; diagnostics: { code: string }[] };
+    expect(again.status).toBe("failed");
+    expect(again.diagnostics.map((d) => d.code)).toEqual(["PROPOSAL_NOT_PENDING"]);
+    expect(snapshot(c.root)).toEqual(afterConfirm);
     expect((await preview("P-002")).diagnostics?.map((d) => d.code)).toEqual(["PROPOSAL_NOT_PENDING"]);
   });
 });
