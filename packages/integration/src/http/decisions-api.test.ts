@@ -247,6 +247,35 @@ describe("damaged or missing Truth (BE-API-02)", () => {
     expect(git(root, "status", "--porcelain")).toBe("");
   });
 
+  it("proposed, rejected and Markdown Decisions, and chain markers for a missing link and a loop, come from the files as they are", async () => {
+    const yaml = (id: string, extra: string[]) => [`id: ${id}`, `title: ${id} title`, "question: q", "answer: a", ...extra, ""].join("\n");
+    const root = repo({
+      ...PROJECT,
+      ".duo-project/decisions/D-010.yaml": yaml("D-010", ["state: proposed"]),
+      ".duo-project/decisions/D-011.yaml": yaml("D-011", ["state: rejected"]),
+      ".duo-project/decisions/D-012.yaml": yaml("D-012", ["state: confirmed", "supersedes: D-099"]),
+      ".duo-project/decisions/D-013.yaml": yaml("D-013", ["state: confirmed", "supersedes: D-014"]),
+      ".duo-project/decisions/D-014.yaml": yaml("D-014", ["state: confirmed", "supersedes: D-013"]),
+      ".duo-project/decisions/ADR-020.md": ["---", "id: ADR-020", "type: decision", "title: Use events", "state: confirmed", "question: messaging", "answer: events", "---", "", "# ADR-020 Use events", "", "Events between services.", ""].join("\n"),
+    });
+    commit(root);
+    const c = await serve(root);
+    const before = snapshot(root);
+    const data = (await list(c)).data as { decisions: Summary[]; truth: { complete: boolean; problems: { code: string }[] } };
+    const by = Object.fromEntries(data.decisions.map((d) => [d.id, d]));
+    expect(by["D-010"]).toMatchObject({ state: "proposed", authority: "PROPOSED", locked: false, lockStatus: "not-confirmed", origin: null });
+    expect(by["D-011"]).toMatchObject({ state: "rejected", authority: "REJECTED", lockStatus: "not-confirmed", origin: null });
+    expect(by["ADR-020"]).toMatchObject({ state: "confirmed", authority: "CONFIRMED", origin: "manual", lockStatus: "missing", location: expect.objectContaining({ path: ".duo-project/decisions/ADR-020.md" }) });
+    expect(((await get(c, "/api/decisions/ADR-020")).json().data as { status: string }).status).toBe("found");
+    const chain = async (id: string) => ((await get(c, "/api/decisions/" + id)).json().data as { decision: { chain: unknown[] } }).decision.chain;
+    expect(await chain("D-012")).toEqual([{ id: "D-099", missing: true }, { id: "D-012", state: "confirmed", authority: "CONFIRMED" }]);
+    expect(await chain("D-013")).toEqual([{ id: "D-013", loop: true }, { id: "D-014", state: "confirmed", authority: "CONFIRMED" }, { id: "D-013", state: "confirmed", authority: "CONFIRMED" }]);
+    // The supersede cycle is a Truth error: shown, not hidden, and Truth is reported incomplete.
+    expect(data.truth.complete).toBe(false);
+    expect(snapshot(root)).toEqual(before);
+  });
+
+
   it("a repository without DUO answers not-initialized", async () => {
     const root = repo({ "README.md": "# none\n" });
     commit(root);
