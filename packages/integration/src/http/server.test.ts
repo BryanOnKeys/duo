@@ -15,6 +15,7 @@ import { indexRepository, openProjectGraphReader, openProjectGraphStore } from "
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { LLMProviderPool } from "../llm/factory.js";
 import { CONTENT_SECURITY_POLICY, locateUiAssets, startDuoUiServer, type DuoUiServer } from "./server.js";
+import { completeWorkTask, listWorkTasks, touchWorkTask } from "./work-map.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 const FIXTURE = fileURLToPath(new URL("../../../../fixtures/review/app/", import.meta.url));
@@ -74,6 +75,130 @@ afterAll(async () => {
   await server?.close();
   registry?.dispose();
   temps.forEach((t) => fs.rmSync(t, { recursive: true, force: true }));
+});
+
+describe("work map projection", () => {
+  it("keys active MCP work by normalized full text, retains IDs on repeat, and starts a new ID after completion", () => {
+    const session = "identity-policy-session";
+    const first = touchWorkTask(root, "Codex", "  Inspect launch\r\npath  ", new Date("2026-10-21T00:00:00Z"), { duoSessionId: session });
+    const repeated = touchWorkTask(root, "Codex", "Inspect launch\npath", new Date("2026-10-21T00:00:01Z"),
+      { duoSessionId: session, targetRef: "issue:AUTH-7" });
+    const resolvedAgain = touchWorkTask(root, "Codex", "Inspect launch\npath", new Date("2026-10-21T00:00:01Z"), { duoSessionId: session });
+    const similar = touchWorkTask(root, "Codex", "Inspect launch\nroute", new Date("2026-10-21T00:00:02Z"), { duoSessionId: session });
+    expect(first?.id).toBe(repeated?.id);
+    expect(first?.id).toBe(resolvedAgain?.id);
+    expect(first?.taskKey).toBe(repeated?.taskKey);
+    expect(repeated?.targetRef).toBe("issue:AUTH-7");
+    expect(similar?.id).not.toBe(first?.id);
+    expect(similar?.name).toBe(first?.name);
+
+    const completed = completeWorkTask(root, first?.id ?? "", new Date("2026-10-21T00:00:03Z"));
+    const restarted = touchWorkTask(root, "Codex", "Inspect launch\npath", new Date("2026-10-21T00:00:04Z"), { duoSessionId: session });
+    expect(completed?.status).toBe("completed");
+    expect(restarted?.id).not.toBe(first?.id);
+    expect(listWorkTasks(root).filter((task) => task.taskKey === first?.taskKey).map((task) => task.status)).toEqual(["completed", "active"]);
+    if (restarted !== undefined) completeWorkTask(root, restarted.id, new Date("2026-10-21T00:00:05Z"));
+    if (similar !== undefined) completeWorkTask(root, similar.id, new Date("2026-10-21T00:00:05Z"));
+  });
+
+  it("bounds activity lock contention to the MCP-specific wait budget", () => {
+    const runtime = path.join(root, ".duo-project", "runtime");
+    const lock = path.join(runtime, "work-tasks.lock");
+    fs.mkdirSync(runtime, { recursive: true });
+    fs.writeFileSync(lock, "held by another process", "utf8");
+    const start = performance.now();
+    try {
+      expect(() => touchWorkTask(root, "Codex", "Lock wait probe", new Date(), { duoSessionId: "lock-probe" }, 100))
+        .toThrow("Timed out waiting for work task lock");
+      expect(performance.now() - start).toBeLessThan(1000);
+    } finally { fs.rmSync(lock, { force: true }); }
+  });
+
+  it("migrates v1 tasks without changing their IDs", () => {
+    const file = path.join(root, ".duo-project", "runtime", "work-tasks.json");
+    const previous = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined;
+    const legacy = [{ id: "legacy-task-id", agent: "Codex", name: "Legacy work", updatedAt: "2026-10-20T00:00:00Z", status: "active" }];
+    try {
+      fs.writeFileSync(file, JSON.stringify(legacy), "utf8");
+      expect(listWorkTasks(root)).toEqual([expect.objectContaining({ ...legacy[0], identitySource: "legacy" })]);
+      expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({ format: "duo.work-tasks/2", tasks: [{ id: "legacy-task-id" }] });
+    } finally {
+      if (previous === undefined) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, previous, "utf8");
+    }
+  });
+
+  it("detects missed task and repository edits through a small revision", async () => {
+    const before = (await get("/api/work-revision")).json().data.revision;
+    expect(typeof before).toBe("string");
+    const created = await post("/api/work-tasks", { agent: "Codex", name: "Revision probe" });
+    expect(created.status).toBe(200);
+    const afterTask = (await get("/api/work-revision")).json().data.revision;
+    expect(afterTask).not.toBe(before);
+    const file = path.join(root, "revision-probe.txt");
+    fs.writeFileSync(file, "one");
+    const afterFile = (await get("/api/work-revision")).json().data.revision;
+    expect(afterFile).not.toBe(afterTask);
+    fs.writeFileSync(file, "longer content");
+    expect((await get("/api/work-revision")).json().data.revision).not.toBe(afterFile);
+    fs.rmSync(file);
+    await post("/api/work-task-complete", { id: (created.json().data.task as { id: string }).id });
+  });
+
+  it("streams a repository change to the authenticated UI session", async () => {
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port: server.port, path: "/api/work-events", headers: {
+        Host: `127.0.0.1:${server.port}`, Cookie: cookie,
+      } }, (res) => {
+        let received = "";
+        res.on("data", (chunk: Buffer) => {
+          received += chunk.toString("utf8");
+          if (received.includes('"kind":"connected"')) fs.writeFileSync(path.join(root, "watch-probe.tmp"), "probe");
+          if (received.includes('"kind":"repository-changed"')) {
+            fs.rmSync(path.join(root, "watch-probe.tmp"), { force: true });
+            req.destroy(); resolve();
+          }
+        });
+      });
+      req.on("error", reject);
+      req.end();
+      setTimeout(() => { req.destroy(); reject(new Error("repository change event timed out")); }, 5000).unref();
+    });
+  });
+
+  it("stores compact task and graph JSON while reusing DUO issue relations", async () => {
+    const created = await post("/api/work-tasks", { agent: "Codex", name: "Refresh flow", issueId: "AUTH-7" });
+    expect(created.status).toBe(200);
+    const task = created.json().data.task as { id: string };
+    const response = await get(`/api/work-map?selected=${task.id}`);
+    expect(response.status).toBe(200);
+    const map = response.json().data as { nodes: { id: string; label: string }[]; edges: { source: string; type: string }[]; selectedTaskId: string };
+    expect(map.selectedTaskId).toBe(task.id);
+    expect(map.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: `task:${task.id}`, label: "[Codex] Refresh flow" })]));
+    expect(map.nodes.some((n) => n.id.includes("AUTH-7"))).toBe(true);
+    expect(map.edges.some((e) => e.source === "duo")).toBe(true);
+    const saved = fs.readFileSync(path.join(root, ".duo-project/cache/work-map.json"), "utf8");
+    expect(saved).toBe(JSON.stringify(JSON.parse(saved)));
+    expect(Buffer.byteLength(saved)).toBeLessThan(25_000);
+    const expanded = await get("/api/work-expand?node=issue:AUTH-7&depth=1");
+    expect(expanded.status).toBe(200);
+    const expansion = expanded.json().data as { nodes: { type: string; label: string }[]; edges: { from: string; to: string }[] };
+    expect(expansion.nodes.some((n) => n.type === "project" || n.label === "DUO")).toBe(false);
+    expect(expansion.edges.every((edge) => !edge.from.startsWith("project:") && !edge.to.startsWith("project:"))).toBe(true);
+    const deepExpansion = await get("/api/work-expand?node=issue:AUTH-7&depth=3");
+    expect((deepExpansion.json().data as { nodes: unknown[] }).nodes.length).toBeLessThanOrEqual(24);
+    expect((await post("/api/work-task-complete", { id: task.id })).status).toBe(200);
+    const after = (await get("/api/work-map")).json().data as { nodes: { type: string }[] };
+    expect(after.nodes.some((n) => n.type === "task")).toBe(false);
+  });
+
+  it("focuses the most recently updated active work when none is selected", async () => {
+    const first = (await post("/api/work-tasks", { agent: "Codex", name: "First work" })).json().data.task as { id: string };
+    const second = (await post("/api/work-tasks", { agent: "Codex", name: "Latest work" })).json().data.task as { id: string };
+    const map = (await get("/api/work-map")).json().data as { selectedTaskId: string };
+    expect(map.selectedTaskId).toBe(second.id);
+    await post("/api/work-task-complete", { id: first.id });
+    await post("/api/work-task-complete", { id: second.id });
+  });
 });
 
 describe("session and transport security (T18.1)", () => {
