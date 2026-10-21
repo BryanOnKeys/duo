@@ -18,6 +18,7 @@ UI에서 허용하는 쓰기는 Human의 Decision Proposal **Confirm**과 **Reje
 | GET | `/api/overview` | 상태, 현재 milestone, freshness, baseline, coverage, Truth 수, gap, 최근 Review |
 | GET | `/api/direction` | Vision, Milestone, Requirement, Constraint, Decision의 source 위치 |
 | GET | `/api/proposals` | DecisionService의 pending/committed/rejected logical state |
+| GET | `/api/proposals/:id/preview` | `duo.ui.preview/1`(BE-API-05, T95). pending proposal 하나의 `DecisionService.previewConfirm` 결과: `{ status: "ready", preview, warnings }`. `preview`는 `/api/proposals`의 `previews` 항목과 같은 `ConfirmPreview`이고 `preview.digest`를 confirm의 `previewDigest`로 보낸다. 확정·거절된 proposal은 `PROPOSAL_NOT_PENDING`, 없으면 `PROPOSAL_NOT_FOUND`, Truth가 완전하지 않으면 `PROJECT_TRUTH_INVALID`로 `status: failed`. 읽기만 하며 lock·쓰기·repair가 없다. proposal ID 형식이 아니면 400 `UI_REQUEST_INVALID` |
 | GET | `/api/graph?node=&kind=trace\|impact&depth=` | 기존 bounded trace/impact operation (기본 200 node) |
 | GET | `/api/entity/:id` | Truth/Graph entity 상세와 source slice |
 | GET | `/api/reviews`, `/api/reviews/:id` | Human 보존 Review Record와 Evidence pointer |
