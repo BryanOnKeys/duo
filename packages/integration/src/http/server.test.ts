@@ -15,6 +15,7 @@ import { indexRepository, openProjectGraphReader, openProjectGraphStore } from "
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { LLMProviderPool } from "../llm/factory.js";
 import { CONTENT_SECURITY_POLICY, locateUiAssets, startDuoUiServer, type DuoUiServer } from "./server.js";
+import { completeWorkTask, listWorkTasks, touchWorkTask } from "./work-map.js";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
 const FIXTURE = fileURLToPath(new URL("../../../../fixtures/review/app/", import.meta.url));
@@ -77,6 +78,55 @@ afterAll(async () => {
 });
 
 describe("work map projection", () => {
+  it("keys active MCP work by normalized full text, retains IDs on repeat, and starts a new ID after completion", () => {
+    const session = "identity-policy-session";
+    const first = touchWorkTask(root, "Codex", "  Inspect launch\r\npath  ", new Date("2026-10-21T00:00:00Z"), { duoSessionId: session });
+    const repeated = touchWorkTask(root, "Codex", "Inspect launch\npath", new Date("2026-10-21T00:00:01Z"),
+      { duoSessionId: session, targetRef: "issue:AUTH-7" });
+    const resolvedAgain = touchWorkTask(root, "Codex", "Inspect launch\npath", new Date("2026-10-21T00:00:01Z"), { duoSessionId: session });
+    const similar = touchWorkTask(root, "Codex", "Inspect launch\nroute", new Date("2026-10-21T00:00:02Z"), { duoSessionId: session });
+    expect(first?.id).toBe(repeated?.id);
+    expect(first?.id).toBe(resolvedAgain?.id);
+    expect(first?.taskKey).toBe(repeated?.taskKey);
+    expect(repeated?.targetRef).toBe("issue:AUTH-7");
+    expect(similar?.id).not.toBe(first?.id);
+    expect(similar?.name).toBe(first?.name);
+
+    const completed = completeWorkTask(root, first?.id ?? "", new Date("2026-10-21T00:00:03Z"));
+    const restarted = touchWorkTask(root, "Codex", "Inspect launch\npath", new Date("2026-10-21T00:00:04Z"), { duoSessionId: session });
+    expect(completed?.status).toBe("completed");
+    expect(restarted?.id).not.toBe(first?.id);
+    expect(listWorkTasks(root).filter((task) => task.taskKey === first?.taskKey).map((task) => task.status)).toEqual(["completed", "active"]);
+    if (restarted !== undefined) completeWorkTask(root, restarted.id, new Date("2026-10-21T00:00:05Z"));
+    if (similar !== undefined) completeWorkTask(root, similar.id, new Date("2026-10-21T00:00:05Z"));
+  });
+
+  it("bounds activity lock contention to the MCP-specific wait budget", () => {
+    const runtime = path.join(root, ".duo-project", "runtime");
+    const lock = path.join(runtime, "work-tasks.lock");
+    fs.mkdirSync(runtime, { recursive: true });
+    fs.writeFileSync(lock, "held by another process", "utf8");
+    const start = performance.now();
+    try {
+      expect(() => touchWorkTask(root, "Codex", "Lock wait probe", new Date(), { duoSessionId: "lock-probe" }, 100))
+        .toThrow("Timed out waiting for work task lock");
+      expect(performance.now() - start).toBeLessThan(1000);
+    } finally { fs.rmSync(lock, { force: true }); }
+  });
+
+  it("migrates v1 tasks without changing their IDs", () => {
+    const file = path.join(root, ".duo-project", "runtime", "work-tasks.json");
+    const previous = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined;
+    const legacy = [{ id: "legacy-task-id", agent: "Codex", name: "Legacy work", updatedAt: "2026-10-20T00:00:00Z", status: "active" }];
+    try {
+      fs.writeFileSync(file, JSON.stringify(legacy), "utf8");
+      expect(listWorkTasks(root)).toEqual([expect.objectContaining({ ...legacy[0], identitySource: "legacy" })]);
+      expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({ format: "duo.work-tasks/2", tasks: [{ id: "legacy-task-id" }] });
+    } finally {
+      if (previous === undefined) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, previous, "utf8");
+    }
+  });
+
   it("detects missed task and repository edits through a small revision", async () => {
     const before = (await get("/api/work-revision")).json().data.revision;
     expect(typeof before).toBe("string");

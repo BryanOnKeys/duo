@@ -128,7 +128,7 @@ export async function serveDuoMcp(options: DuoMcpOptions): Promise<ParseResult<D
   let closing: Promise<void> | undefined;
   const close = () => {
     closing ??= handle.close().catch((e: unknown) => log(`${MCP_SERVER_NAME}: ${(e as Error).message}`)).finally(() => {
-      try { disconnectWorkSession(options.root, duoSessionId, new Date()); }
+      try { disconnectWorkSession(options.root, duoSessionId, new Date(), 100); }
       catch (e) { log(`${MCP_SERVER_NAME}: work session close: ${(e as Error).message}`); }
       process.stdin.off("end", onEnd).off("close", onEnd);
       process.off("SIGINT", onSignal).off("SIGTERM", onSignal);

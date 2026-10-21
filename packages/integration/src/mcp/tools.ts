@@ -118,13 +118,26 @@ export interface ToolContext {
   /** The server's in-memory repository token counts (TASK-019): same context metrics, less rereading. */
   readonly tokenCounts?: TokenCountMemo;
   readonly log?: (line: string) => void;
+  /** Internal seam for deterministic activity failure tests. */
+  readonly workActivity?: WorkActivityStore;
 }
 
-function recordActivity(ctx: ToolContext, action: () => void): void {
-  try { action(); }
+export interface WorkActivityStore {
+  touch: typeof touchWorkTask;
+  review: typeof recordWorkReview;
+}
+
+const WORK_ACTIVITY_LOCK_WAIT_MS = 100;
+const DEFAULT_WORK_ACTIVITY: WorkActivityStore = { touch: touchWorkTask, review: recordWorkReview };
+
+function recordActivity<T>(ctx: ToolContext, phase: string, action: () => T): T | undefined {
+  const started = performance.now();
+  try { return action(); }
   catch (error) {
     // Work map persistence is auxiliary: never replace a successful MCP result with its failure.
-    try { ctx.log?.(`duo work activity: ${(error as Error).message}`); } catch { /* logging is auxiliary too */ }
+    try { ctx.log?.(`duo work activity ${phase} failed after ${Math.round(performance.now() - started)} ms: ${error instanceof Error ? error.message : String(error)}`); }
+    catch { /* logging is auxiliary too */ }
+    return undefined;
   }
 }
 
@@ -176,7 +189,7 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
   },
   duo_get_context: {
     name: "duo_get_context", title: "Project direction context for a task", readOnly: true,
-    description: "Returns project direction context for a task: confirmed intent, relevant code and tests, pending decisions and Knowledge Gaps. Does not modify project truth or code, or index; records local work activity for the UI. If the index is stale, returns status index-required (run duoctl index). Surfaced gaps are open questions, not instructions; ask the human only when gaps.requiresHumanInput is true. Pending proposals are not confirmed decisions. If the task names only an Issue ID and you know which files you will change, include their repository paths in the task (for example \"TASK-015 apps/desktop/src/main.ts\").",
+    description: "Returns project direction context for a task: confirmed intent, relevant code and tests, pending decisions and Knowledge Gaps. Does not modify project truth or code, or index; when a DUO session is available, records local work activity for the UI. If the index is stale, returns status index-required (run duoctl index). Surfaced gaps are open questions, not instructions; ask the human only when gaps.requiresHumanInput is true. Pending proposals are not confirmed decisions. If the task names only an Issue ID and you know which files you will change, include their repository paths in the task (for example \"TASK-015 apps/desktop/src/main.ts\").",
     run: async (args, ctx) => {
       const op = await projectContext(ctx.root, { task: args.task, ...(args.budget === undefined ? {} : { budget: args.budget }), ...(args.profile === undefined ? {} : { profile: args.profile }) }, {
         signal: ctx.signal, ...(ctx.tokenCounts === undefined ? {} : { tokenCounts: ctx.tokenCounts }),
@@ -188,8 +201,10 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
         const explicit = candidates.filter((s) => s.match === "id");
         const targetRef = explicit.length === 1 ? explicit[0]?.id : explicit.length > 1 ? undefined
           : candidates.length === 1 ? candidates[0]?.id : undefined;
-        recordActivity(ctx, () => { touchWorkTask(ctx.root, ctx.agentName, args.task, new Date(), ctx.duoSessionId === undefined ? undefined
-          : { duoSessionId: ctx.duoSessionId, ...(targetRef === undefined ? {} : { targetRef }) }); });
+        const duoSessionId = ctx.duoSessionId;
+        if (duoSessionId !== undefined) recordActivity(ctx, "task", () =>
+          (ctx.workActivity ?? DEFAULT_WORK_ACTIVITY).touch(ctx.root, ctx.agentName, args.task, new Date(),
+            { duoSessionId, ...(targetRef === undefined ? {} : { targetRef }) }, WORK_ACTIVITY_LOCK_WAIT_MS));
       }
       const p = op.kind === "ok" ? op.payload : undefined;
       return { op, metric: { status: p?.status ?? op.kind, ...(p?.context.packet === undefined ? {} : { contextTokens: p.context.packet.metrics.budget.used, contextBudget: p.context.packet.metrics.budget.total }), llmCalls: 0 } };
@@ -204,7 +219,7 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
   },
   duo_review_changes: {
     name: "duo_review_changes", title: "Review changes against confirmed project direction", readOnly: true,
-    description: "Reviews changes (default HEAD → WORKTREE) against confirmed project direction and returns claims, evidence, Knowledge Gaps and a verdict (PASS, WARN, BLOCK, ASK). Does not modify code or project truth, does not index (a stale index returns status index-required) and does not record the review. PASS means no direction violation found in the available evidence, not bug-free code. includeSemanticAssist (default false) asks the LLM provider configured in project.yaml for supplemental semantic checks, returned separately in semanticAssist; they never change the deterministic claims and never block.",
+    description: "Reviews changes (default HEAD → WORKTREE) against confirmed project direction and returns claims, evidence, Knowledge Gaps and a verdict (PASS, WARN, BLOCK, ASK). Does not modify code or project truth or index (a stale index returns status index-required). It does not persist a formal Review Record; when a DUO session and task are available, it stores a small local activity summary for the Work map. PASS means no direction violation found in the available evidence, not bug-free code. includeSemanticAssist (default false) asks the LLM provider configured in project.yaml for supplemental semantic checks, returned separately in semanticAssist; they never change the deterministic claims and never block.",
     run: async (args, ctx) => {
       const op = await projectReview(ctx.root, {
         diff: { from: args.from === undefined ? "HEAD" : diffEnd(args.from), to: args.to === undefined ? "WORKTREE" : diffEnd(args.to), ...(args.files === undefined ? {} : { files: args.files as RepoPath[] }) },
@@ -213,13 +228,19 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
       }, { signal: ctx.signal, llm: ctx.llm, ...(ctx.tokenCounts === undefined ? {} : { tokenCounts: ctx.tokenCounts }) });
       if (op.kind === "ok" && args.task !== undefined) {
         const at = new Date();
-        recordActivity(ctx, () => {
-          const task = touchWorkTask(ctx.root, ctx.agentName, args.task as string, at,
-            ctx.duoSessionId === undefined ? undefined : { duoSessionId: ctx.duoSessionId });
-          if (task !== undefined && ctx.duoSessionId !== undefined && op.payload.diff !== undefined) recordWorkReview(ctx.root, ctx.duoSessionId, task.id,
-            { digest: op.payload.diff.identity, ...(op.payload.verdict === undefined ? {} : { verdict: op.payload.verdict }),
-              claimCount: op.payload.claims.length }, at);
-        });
+        const duoSessionId = ctx.duoSessionId;
+        const taskText = args.task;
+        const reviewDiff = op.payload.diff;
+        if (duoSessionId !== undefined) {
+          const activity = ctx.workActivity ?? DEFAULT_WORK_ACTIVITY;
+          if (taskText !== undefined) {
+            const task = recordActivity(ctx, "task", () => activity.touch(ctx.root, ctx.agentName, taskText, at,
+              { duoSessionId }, WORK_ACTIVITY_LOCK_WAIT_MS));
+            if (task !== undefined && reviewDiff !== undefined) recordActivity(ctx, "review", () => activity.review(ctx.root, duoSessionId, task.id,
+              { digest: reviewDiff.identity, ...(op.payload.verdict === undefined ? {} : { verdict: op.payload.verdict }),
+                claimCount: op.payload.claims.length }, at, WORK_ACTIVITY_LOCK_WAIT_MS));
+          }
+        }
       }
       const r = op.kind === "ok" ? op.payload : undefined;
       return { op, metric: { status: r?.status ?? op.kind, ...(r?.verdict === undefined ? {} : { reviewVerdict: r.verdict }), ...(r === undefined ? {} : { reviewClaims: r.claims.length, ...reviewLlmMetric(r) }) } };

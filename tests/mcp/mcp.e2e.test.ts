@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { createDecisionService } from "@duo-director/core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { LLMProviderPool } from "../../packages/integration/src/llm/factory.js";
+import { TOOLS, type WorkActivityStore } from "../../packages/integration/src/mcp/tools.js";
+import { completeWorkTask, touchWorkTask } from "../../packages/integration/src/http/work-map.js";
 import { CLI_MAIN, duoctl, existingProject, snapshot } from "../cli/support.js";
 import { contextRegistry, makeContextRepo, REVIEW_FIXTURE } from "../../packages/director/src/context/testing.js";
 import { startMcp, type McpSession } from "./support.js";
@@ -40,6 +43,7 @@ describe("duo-director MCP: protocol, tool list as the permission contract, argu
     const describe = (n: string) => tools.find((t) => t.name === n)?.description ?? "";
     expect(describe("duo_get_context")).toMatch(/Does not modify project truth or code, or index.*index-required/su);
     expect(describe("duo_review_changes")).toContain("Does not modify code or project truth");
+    expect(describe("duo_review_changes")).toContain("does not persist a formal Review Record");
     expect(describe("duo_propose_decision")).toMatch(/proposal only.*Cannot confirm or reject a decision/su);
   });
 
@@ -228,16 +232,74 @@ describe("Work map activity does not change MCP results", () => {
   it("preserves successful context and review responses when activity storage is malformed or unreadable", async () => {
     fs.mkdirSync(path.dirname(activity), { recursive: true });
     fs.writeFileSync(activity, "{malformed", "utf8");
+    const malformedBefore = fs.readFileSync(activity, "utf8");
     const context = await s.call("duo_get_context", { task: "Scheduler.next" });
     expect(context.isError).toBeFalsy();
     expect(context.structuredContent).toEqual(duoctl(p.root, ["context", "Scheduler.next", "--json"]).json().result);
+    expect(fs.readFileSync(activity, "utf8")).toBe(malformedBefore);
 
     fs.rmSync(activity);
     fs.mkdirSync(activity);
     const review = await s.call("duo_review_changes", { task: "Scheduler.next" });
     expect(review.isError).toBeFalsy();
     expect(review.structuredContent).toEqual(duoctl(p.root, ["review", "--task", "Scheduler.next", "--json"]).json().result);
+    expect(fs.statSync(activity).isDirectory()).toBe(true);
     fs.rmSync(activity, { recursive: true });
+  });
+
+  it("returns a successful context when the activity lock is held and records bounded wait time", async () => {
+    const lock = path.join(path.dirname(activity), "work-tasks.lock");
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, "held by test", "utf8");
+    try {
+      const result = await s.call("duo_get_context", { task: "Lock contention task" });
+      expect(result.isError).toBeFalsy();
+      const timing = s.stderr().match(/duo work activity task failed after (\d+) ms: Timed out waiting for work task lock after \d+ ms \(limit 100 ms\)/u);
+      expect(timing).not.toBeNull();
+      expect(Number(timing?.[1])).toBeLessThan(1000);
+    } finally { fs.rmSync(lock, { force: true }); }
+  });
+
+  it("keeps MCP results when task writes, review writes, or diagnostic logging fail", async () => {
+    const base = { root: p.root, agentName: "Codex", duoSessionId: "failure-injection-session",
+      signal: new AbortController().signal, llm: new LLMProviderPool({}), log: () => { throw new Error("simulated logger failure"); } };
+    const failedTaskStore: WorkActivityStore = {
+      touch: () => { throw new Error("simulated task write failure"); },
+      review: () => { throw new Error("review should be skipped without a task ID"); },
+    };
+    const context = await TOOLS.duo_get_context.run({ task: "Scheduler.next" }, { ...base, workActivity: failedTaskStore });
+    expect(context.op.kind).toBe("ok");
+
+    const failedReviewStore: WorkActivityStore = {
+      touch: (root, agent, task, now, identity, wait) => touchWorkTask(root, agent, task, now, identity, wait),
+      review: () => { throw new Error("simulated review write failure"); },
+    };
+    const review = await TOOLS.duo_review_changes.run({ task: "Scheduler.next" }, { ...base, workActivity: failedReviewStore });
+    expect(review.op.kind).toBe("ok");
+  });
+
+  it("does not create sessionless activity and retains concurrent writes from separate MCP sessions", async () => {
+    let sessionlessWrites = 0;
+    const noSessionStore: WorkActivityStore = {
+      touch: () => { sessionlessWrites += 1; return undefined; }, review: () => { sessionlessWrites += 1; },
+    };
+    const noSession = await TOOLS.duo_get_context.run({ task: "Scheduler.next" }, {
+      root: p.root, agentName: "Codex", signal: new AbortController().signal, llm: new LLMProviderPool({}), workActivity: noSessionStore,
+    });
+    expect(noSession.op.kind).toBe("ok");
+    expect(sessionlessWrites).toBe(0);
+
+    const second = await open(p.root);
+    const [left, right] = await Promise.all([
+      s.call("duo_get_context", { task: "Parallel session task alpha" }),
+      second.call("duo_get_context", { task: "Parallel session task beta" }),
+    ]);
+    expect(left.isError).toBeFalsy();
+    expect(right.isError).toBeFalsy();
+    const rows = (JSON.parse(fs.readFileSync(activity, "utf8")) as { tasks: { name: string; duoSessionId?: string }[] }).tasks
+      .filter((task) => task.name.startsWith("Parallel session task"));
+    expect(rows.map((task) => task.name).sort()).toEqual(["Parallel session task alpha", "Parallel session task beta"]);
+    expect(new Set(rows.map((task) => task.duoSessionId)).size).toBe(2);
   });
 
   it("attaches free-form reviews by session and full task identity, even when display names match", async () => {
@@ -246,7 +308,7 @@ describe("Work map activity does not change MCP results", () => {
     expect((await s.call("duo_get_context", { task: first })).isError).toBeFalsy();
     expect((await s.call("duo_get_context", { task: second })).isError).toBeFalsy();
     const tasks = () => (JSON.parse(fs.readFileSync(activity, "utf8")) as { tasks: {
-      id: string; name: string; targetRef?: string; taskKey?: string; review?: { digest: string };
+      id: string; name: string; targetRef?: string; taskKey?: string; review?: { digest: string; verdict?: string };
     }[] }).tasks.filter((t) => t.name === "Investigate an unmapped workflow");
     expect(tasks()).toHaveLength(2);
     expect(new Set(tasks().map((t) => t.id)).size).toBe(2);
@@ -258,8 +320,30 @@ describe("Work map activity does not change MCP results", () => {
     expect(tasks().filter((t) => t.review !== undefined)).toHaveLength(1);
     const secondKey = tasks().find((t) => t.review !== undefined)?.taskKey;
     expect(secondKey).toBe(tasks()[1]?.taskKey);
+    const secondReview = tasks().find((t) => t.taskKey === secondKey)?.review;
+    expect(secondReview?.digest).toBe(reviewed.structuredContent.diff.identity);
+    expect(secondReview?.verdict).toBe(reviewed.structuredContent.verdict);
     expect((await s.call("duo_review_changes", { task: first })).isError).toBeFalsy();
     expect(tasks().every((t) => t.review !== undefined)).toBe(true);
+    const firstReviewResult = await s.call("duo_review_changes", { task: first });
+    expect(firstReviewResult.isError).toBeFalsy();
+    const firstKey = tasks().find((t) => t.id !== tasks().find((x) => x.taskKey === secondKey)?.id)?.taskKey;
+    expect(tasks().find((t) => t.taskKey === firstKey)?.review?.digest).toBe(firstReviewResult.structuredContent.diff.identity);
+  });
+
+  it("updates a repeated active task ID and creates a fresh ID when completed work restarts", async () => {
+    const text = "Restartable free-form task\nkeep this detail";
+    await s.call("duo_get_context", { task: text });
+    const lookup = () => (JSON.parse(fs.readFileSync(activity, "utf8")) as { tasks: { id: string; taskKey?: string; name: string; status: string }[] })
+      .tasks.filter((task) => task.name === "Restartable free-form task");
+    const firstId = lookup()[0]?.id;
+    await s.call("duo_get_context", { task: text });
+    expect(lookup().filter((task) => task.status === "active")).toHaveLength(1);
+    expect(lookup()[0]?.id).toBe(firstId);
+    expect(completeWorkTask(p.root, firstId ?? "", new Date())?.status).toBe("completed");
+    await s.call("duo_get_context", { task: text });
+    expect(lookup().map((task) => task.status).sort()).toEqual(["active", "completed"]);
+    expect(new Set(lookup().map((task) => task.id)).size).toBe(2);
   });
 });
 

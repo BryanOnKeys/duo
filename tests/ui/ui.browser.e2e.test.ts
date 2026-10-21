@@ -187,6 +187,20 @@ describe("DUO UI in a browser (T18.1)", () => {
     completeWorkTask(r.root, task?.id ?? "", new Date());
     await node.waitFor({ state: "detached", timeout: liveUpdateTimeoutMs });
     timings.completedVisibleMs = Date.now() - completeStart;
+
+    const sharedA = touchWorkTask(r.root, "Codex", "Shared review label\nvariant alpha", new Date(), { duoSessionId: session });
+    const sharedB = touchWorkTask(r.root, "Codex", "Shared review label\nvariant beta", new Date(), { duoSessionId: session });
+    expect(sharedA?.id).not.toBe(sharedB?.id);
+    recordWorkReview(r.root, session, sharedA?.id ?? "", { digest: "digest-alpha", verdict: "PASS", claimCount: 1 }, new Date());
+    recordWorkReview(r.root, session, sharedB?.id ?? "", { digest: "digest-beta", verdict: "BLOCK", claimCount: 2 }, new Date());
+    const nodeA = page.locator(`.react-flow__node[data-id="task:${sharedA?.id}"]`);
+    const nodeB = page.locator(`.react-flow__node[data-id="task:${sharedB?.id}"]`);
+    await nodeA.waitFor({ timeout: liveUpdateTimeoutMs });
+    await nodeB.waitFor({ timeout: liveUpdateTimeoutMs });
+    await nodeA.click();
+    await page.getByText("Review PASS · 1 claims · digest-alpha").waitFor({ timeout: liveUpdateTimeoutMs });
+    await nodeB.click();
+    await page.getByText("Review BLOCK · 2 claims · digest-beta").waitFor({ timeout: liveUpdateTimeoutMs });
     expect(mapResponses.length).toBeGreaterThanOrEqual(4);
     expect(Math.max(0, ...blankMs)).toBeLessThan(500);
     expect(errors).toEqual([]);

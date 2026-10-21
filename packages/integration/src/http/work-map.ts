@@ -127,7 +127,7 @@ function writeJson(root: string, file: string, value: unknown): void {
 }
 
 /** A short cross-process lock prevents parallel MCP connections from overwriting each other. */
-function withTaskLock<T>(root: string, operation: () => T): T {
+function withTaskLock<T>(root: string, operation: () => T, maxWaitMs = 5000): T {
   const guarded = guardWrite(root, TASK_LOCK, "regenerable");
   if (guarded.value === undefined) throw new Error(guarded.diagnostics.map((d) => d.message).join("; "));
   const target = guarded.value.absolute;
@@ -143,8 +143,9 @@ function withTaskLock<T>(root: string, operation: () => T): T {
       catch (race) { if ((race as NodeJS.ErrnoException).code === "ENOENT") continue; throw race; }
       if (stat.isSymbolicLink()) throw new Error("Refusing symlink work task lock", { cause: error });
       if (Date.now() - stat.mtimeMs > 30_000) { fs.rmSync(target); continue; }
-      if (Date.now() - started > 5_000) throw new Error("Timed out waiting for work task lock", { cause: error });
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      const remaining = maxWaitMs - (Date.now() - started);
+      if (remaining <= 0) throw new Error(`Timed out waiting for work task lock after ${Date.now() - started} ms (limit ${maxWaitMs} ms)`, { cause: error });
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(20, remaining));
     }
   }
   try { return operation(); }
@@ -215,26 +216,21 @@ export function addWorkTask(root: string, input: { agent: string; name: string; 
 
 /** Existing MCP calls surface work without another agent tool call. */
 export function touchWorkTask(root: string, agent: string, taskText: string, now: Date,
-  identity?: { readonly duoSessionId: string; readonly targetRef?: string }): WorkTask | undefined {
-  const name = taskText.split(/\r?\n/u)[0]?.trim().slice(0, 200);
+  identity?: { readonly duoSessionId: string; readonly targetRef?: string }, lockWaitMs = 5000): WorkTask | undefined {
+  const normalizedTask = taskText.replace(/\r\n?/gu, "\n").trim();
+  const name = normalizedTask.split("\n")[0]?.trim().slice(0, 200);
   if (name === undefined || name === "") return undefined;
   const safeAgent = agent.trim().slice(0, 80) || "Agent";
   return withTaskLock(root, () => {
     const tasks = readTasks(root);
-    const taskKey = identity === undefined ? undefined : createHash("sha256").update(taskText).digest("hex").slice(0, 32);
-    const id = identity === undefined ? undefined : (() => {
-      const digest = createHash("sha1").update(`${identity.duoSessionId}\0${identity.targetRef ?? `task:${taskKey}`}`).digest();
-      digest[6] = ((digest[6] ?? 0) & 0x0f) | 0x50;
-      digest[8] = ((digest[8] ?? 0) & 0x3f) | 0x80;
-      const hex = digest.subarray(0, 16).toString("hex");
-      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-    })();
-    const current = tasks.find((t) => t.status !== "completed" && (identity === undefined
-      ? t.agent === safeAgent && t.name === name
-      : t.duoSessionId === identity.duoSessionId && (t.id === id || t.taskKey === taskKey ||
-        (identity.targetRef !== undefined && t.targetRef === identity.targetRef))));
+    const taskKey = identity === undefined ? undefined
+      : createHash("sha256").update(`${identity.duoSessionId}\0${normalizedTask}`).digest("hex");
+    const matching = identity === undefined ? tasks.filter((t) => t.status === "active" && t.agent === safeAgent && t.name === name)
+      : tasks.filter((t) => t.status === "active" && t.duoSessionId === identity.duoSessionId && t.taskKey === taskKey);
+    if (matching.length > 1) throw new Error("Multiple active work tasks share the same session and task identity");
+    const current = matching[0];
     if (current === undefined) {
-      const task: WorkTask = { id: id ?? randomUUID(), agent: safeAgent, name,
+      const task: WorkTask = { id: randomUUID(), agent: safeAgent, name,
         ...(identity === undefined ? { identitySource: "legacy" as const } : { identitySource: "duo" as const, duoSessionId: identity.duoSessionId,
           ...(taskKey === undefined ? {} : { taskKey }), ...(identity.targetRef === undefined ? {} : { targetRef: identity.targetRef }) }),
         worktreeId: worktreeId(root), startedAt: now.toISOString(), updatedAt: now.toISOString(), status: "active" };
@@ -246,27 +242,27 @@ export function touchWorkTask(root: string, agent: string, taskText: string, now
       updatedAt: now.toISOString(), status: "active" };
     saveTasks(root, tasks.map((t) => t.id === current.id ? updated : t));
     return updated;
-  });
+  }, lockWaitMs);
 }
 
 export function recordWorkReview(root: string, duoSessionId: string, taskId: string,
-  review: { readonly digest: string; readonly verdict?: string; readonly claimCount: number }, now: Date): void {
+  review: { readonly digest: string; readonly verdict?: string; readonly claimCount: number }, now: Date, lockWaitMs = 5000): void {
   withTaskLock(root, () => {
     const tasks = readTasks(root);
     const current = tasks.find((t) => t.id === taskId && t.duoSessionId === duoSessionId && t.status === "active");
     if (current === undefined) return;
     saveTasks(root, tasks.map((t) => t.id === current.id ? { ...t,
       review: { ...review, observedAt: now.toISOString() }, updatedAt: now.toISOString() } : t));
-  });
+  }, lockWaitMs);
 }
 
-export function disconnectWorkSession(root: string, duoSessionId: string, now: Date): void {
+export function disconnectWorkSession(root: string, duoSessionId: string, now: Date, lockWaitMs = 5000): void {
   withTaskLock(root, () => {
     const tasks = readTasks(root);
     if (!tasks.some((t) => t.duoSessionId === duoSessionId && t.status === "active")) return;
     saveTasks(root, tasks.map((t) => t.duoSessionId === duoSessionId && t.status === "active"
       ? { ...t, status: "disconnected", updatedAt: now.toISOString() } : t));
-  });
+  }, lockWaitMs);
 }
 
 export function completeWorkTask(root: string, id: string, now: Date): WorkTask | undefined {
