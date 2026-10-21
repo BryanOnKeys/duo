@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { CASES } from "./cases.mjs";
 import { generate, git } from "./fixture.mjs";
+import { readEvents, sumAll } from "./measure.mjs";
 import { judge } from "./oracle.mjs";
 import { TASKS } from "./tasks.mjs";
 
@@ -63,26 +64,8 @@ async function templates() {
   return info;
 }
 
-/** Reads a codex exec --json event stream. */
-export function readEvents(file) {
-  const ev = { turns: 0, usage: { input: 0, cached: 0, output: 0 }, commands: [], fileChanges: 0, mcp: [], checkRuns: 0, failedChecks: 0, reworkCycles: 0, proposals: 0, finalMessage: "" };
-  if (!fs.existsSync(file)) return { ...ev, usage: null };
-  let failing = false;
-  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/u)) {
-    let e; try { e = JSON.parse(line); } catch { continue; }
-    if (e.type === "turn.completed" && e.usage) { ev.turns++; ev.usage.input += e.usage.input_tokens ?? 0; ev.usage.cached += e.usage.cached_input_tokens ?? 0; ev.usage.output += e.usage.output_tokens ?? 0; }
-    if (e.type !== "item.completed" || e.item === undefined) continue;
-    const it = e.item;
-    if (it.type === "command_execution") {
-      ev.commands.push({ command: String(it.command).slice(0, 300), exit: it.exit_code ?? null });
-      if (/npm run check|eslint|check-deps|duoctl (review|index)/u.test(it.command)) { ev.checkRuns++; if ((it.exit_code ?? 0) !== 0) { ev.failedChecks++; failing = true; } else failing = false; }
-    }
-    if (it.type === "mcp_tool_call") { ev.mcp.push({ server: it.server, tool: it.tool, status: it.status }); if (it.tool === "duo_review_changes") { ev.checkRuns++; } if (it.tool === "duo_propose_decision") ev.proposals++; }
-    if (it.type === "file_change") { ev.fileChanges++; if (failing) { ev.reworkCycles++; failing = false; } }
-    if (it.type === "agent_message") ev.finalMessage = String(it.text ?? "");
-  }
-  return ev;
-}
+/** Codex event parsing lives in measure.mjs (pure, unit-tested); re-exported for existing callers. */
+export { readEvents };
 
 function runCodex(repo, prompt, files, env) {
   return new Promise((resolve) => {
@@ -93,7 +76,22 @@ function runCodex(repo, prompt, files, env) {
     p.stdout.pipe(log); p.stderr.on("data", (d) => fs.appendFileSync(files.stderr, d));
     p.stdin.end(prompt);
     const timer = setTimeout(() => { fs.appendFileSync(files.stderr, "\nTIMEOUT\n"); p.kill(); }, opts.timeoutMin * 60_000);
-    p.on("close", (code) => { clearTimeout(timer); log.end(); resolve({ exit: code, wallSeconds: Math.round((performance.now() - t) / 100) / 10, timedOut: fs.existsSync(files.stderr) && fs.readFileSync(files.stderr, "utf8").includes("TIMEOUT") }); });
+    let logError;
+    log.on("error", (error) => { logError ??= error; });
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      const wallSeconds = Math.round((performance.now() - t) / 100) / 10;
+      // Resolve only after the event log has flushed (finish) or failed (error), so the last turn.completed is not lost.
+      let settled = false;
+      const done = () => {
+        if (settled) return; settled = true;
+        resolve({ exit: code, wallSeconds, timedOut: fs.existsSync(files.stderr) && fs.readFileSync(files.stderr, "utf8").includes("TIMEOUT"), ...(logError === undefined ? {} : { logError: String(logError.message ?? logError) }) });
+      };
+      if (logError !== undefined || log.writableFinished) return done();
+      log.once("finish", done);
+      log.once("error", (error) => { logError ??= error; done(); });
+      log.end();
+    });
   });
 }
 
@@ -152,7 +150,8 @@ async function main() {
       record.sessions.push({ ...r, events: readEvents(files.events) });
     }
     const evs = record.sessions.map((s) => s.events).filter((e) => e !== undefined);
-    const sum = (k) => (evs.some((e) => e.usage === null) || evs.length === 0 ? null : evs.reduce((p, e) => p + e.usage[k], 0));
+    // A session without usage (or a session whose event log could not be written) makes the run's token totals NOT MEASURED.
+    const sum = (k) => (evs.length !== record.sessions.length || record.sessions.some((s) => s.logError !== undefined) ? null : sumAll(evs.map((e) => e.usage?.[k])));
     Object.assign(record, {
       status: opts.dryRun ? "dry-run" : record.sessions.some((s) => s.timedOut) ? "timeout" : record.sessions.every((s) => s.exit === 0) ? "completed" : "failed",
       wallSeconds: opts.dryRun ? null : record.sessions.reduce((p, s) => p + s.wallSeconds, 0),

@@ -12,6 +12,8 @@ Protocol and results: [docs/validation/value-validation-01](../../docs/validatio
 | `agent.mjs` | Part 2 harness: seeded balanced schedule, fresh repository per run, `codex exec --json` with a pinned model, metrics, oracle, acceptance test. `--selftest` checks the oracle against the 17 cases; `--dry-run` builds everything without Codex | yes, only with `--model` and `--i-understand-this-uses-codex` |
 | `discovery.mjs` | Part 3 (#8): published 0.3.2 vs 0.3.3, real Codex tool discovery, first-call success, CLI fallback; `--dry-run` measures server startup only | yes, same guard |
 | `aggregate.mjs` | Turns results into the protocol's tables; unmeasured values stay NOT MEASURED | no |
+| `measure.mjs` | Pure measurement helpers used by `agent.mjs` and `aggregate.mjs`: Codex event parsing (no valid usage event → usage `null`), totals and medians that become `null` when any run value is missing, measured-run counts | no |
+| `measure.test.mjs` | Regression tests for the NOT MEASURED rule: `node --test bench/value-validation/measure.test.mjs` | no |
 | `results/detection-01.json` | Part 1 raw result (2026-10-15) | |
 
 ```bash
