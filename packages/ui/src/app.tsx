@@ -9,10 +9,11 @@ import { OverviewPage } from "./pages/overview.js";
 import { ReviewPage } from "./pages/review.js";
 import { ReviewRecordPage, ReviewsPage } from "./pages/reviews.js";
 import { SearchPage } from "./pages/search.js";
+import { WorkPage } from "./pages/work.js";
 import { Link, usePath } from "./router.js";
 
 export const NAV: readonly (readonly [string, string])[] = [
-  ["/overview", "Overview"], ["/direction", "Direction"], ["/decisions", "Pending decisions"], ["/graph", "Graph"], ["/coverage", "Analysis coverage"],
+  ["/overview", "Overview"], ["/direction", "Direction"], ["/decisions", "Pending decisions"], ["/work", "Work map"], ["/graph", "Graph"], ["/coverage", "Analysis coverage"],
   ["/context", "Context"], ["/review", "Review"], ["/reviews", "Review history"], ["/search", "Search"],
 ];
 
@@ -25,6 +26,7 @@ export function route(pathname: string) {
     case "/direction": return <DirectionPage />;
     case "/decisions": return <DecisionsPage />;
     case "/graph": return <GraphPage />;
+    case "/work": return <WorkPage />;
     case "/coverage": return <CoveragePage />;
     case "/context": return <ContextPage />;
     case "/review": return <ReviewPage />;
@@ -43,7 +45,7 @@ export function App() {
       <nav aria-label="DUO">
         <p className="brand">DUO <span className="muted small">Project Direction Console</span></p>
         <ul>{NAV.map(([to, label]) => <li key={to}><Link to={to} current={pathname === to || (to === "/overview" && pathname === "/")}>{label}</Link></li>)}</ul>
-        <p className="muted small">Local only. Reads Project Truth; writes only human Decision confirm/reject.</p>
+        <p className="muted small">Local only. Project Truth changes require human Decision actions; work activity is local runtime data.</p>
       </nav>
       <main id="main" tabIndex={-1}>{route(pathname)}</main>
     </div>
