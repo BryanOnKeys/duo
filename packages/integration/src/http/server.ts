@@ -26,8 +26,8 @@ import { projectContext } from "../operations/context.js";
 import { projectGraphQuery } from "../operations/graph.js";
 import { diffEnd, projectReview } from "../operations/review.js";
 import { searchEvidence } from "../operations/search.js";
-import { projectProposalPreview } from "./preview.js";
 import { projectDirection, projectEntity, projectOverview, projectProposals, projectReviewHistory } from "./projection.js";
+import { projectProposalPreview } from "./preview.js";
 
 export const UI_API_VERSION = "1";
 const MAX_BODY_BYTES = 64 * 1024;
