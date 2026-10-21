@@ -29,6 +29,7 @@ import { diffEnd, projectReview } from "../operations/review.js";
 import { searchEvidence } from "../operations/search.js";
 import { projectDecisionDetail, projectDecisionList } from "./decisions.js";
 import { projectDirection, projectEntity, projectOverview, projectProposals, projectReviewHistory } from "./projection.js";
+import { projectProposalPreview } from "./preview.js";
 import { addWorkTask, completeWorkTask, expandWorkNode, listWorkTasks, projectWorkMap, workMapRevision } from "./work-map.js";
 
 export const UI_API_VERSION = "1";
@@ -198,6 +199,18 @@ export async function startDuoUiServer(options: DuoUiServerOptions): Promise<Duo
       if (method !== m) throw new HttpError(405, "UI_METHOD_NOT_ALLOWED", `${method} is not allowed on /api/${route}`);
     };
     const confirmMatch = /^proposals\/([^/]+)\/(confirm|reject)$/u.exec(route);
+    const previewMatch = /^proposals\/([^/]+)\/preview$/u.exec(route);
+    if (previewMatch !== null) {
+      only("GET");
+      let id: string;
+      try {
+        id = decodeURIComponent(previewMatch[1] as string);
+      } catch {
+        throw new HttpError(400, "UI_REQUEST_INVALID", "not a proposal ID");
+      }
+      if (!PROPOSAL_ID.test(id)) throw new HttpError(400, "UI_REQUEST_INVALID", "not a proposal ID");
+      return { name: "preview", body: await projectProposalPreview(root, id) };
+    }
     if (confirmMatch !== null) {
       only("POST");
       const id = decodeURIComponent(confirmMatch[1] as string);
