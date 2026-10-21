@@ -1,8 +1,9 @@
-# Backend API 계약(로컬 UI 서버, T87, T94 수정)
+# Backend API 계약(로컬 UI 서버, T87, T94·T106 수정)
 
 대상: `duoctl ui`가 띄우는 로컬 HTTP 서버(`packages/integration/src/http/server.ts`)와 FE(`packages/ui`). 표시 규칙:
 
 - **IMPLEMENTED:** 공개 0.3.3에 있음
+- **IMPLEMENTED(next):** `next`에 병합됐지만 아직 공개 릴리스에 없음(T106). 다음 릴리스에 들어갈 때 IMPLEMENTED로 바꾼다
 - **PROPOSED:** 설계안이며 구현되지 않음. 대부분 [decision-rbac-design.md](decision-rbac-design.md)의 Human Decision을 기다린다
 
 존재하지 않는 인증 서버나 엔드포인트를 구현된 것처럼 적지 않는다. OpenAPI 파일은 만들지 않았다. 서버가 하나의 프로세스 안에서 세션 쿠키와 CSRF로 동작하는 로컬 도구라, 별도 명세 파일이 실제 계약보다 앞서 나갈 위험이 더 크다. FE가 쓸 타입은 §7에 TypeScript로 둔다.
@@ -28,6 +29,7 @@
 | GET | `/api/overview` | 없음 | 프로젝트 개요 | 도메인 실패 | 세션 | 없음 | 예 | 읽기 전용 그래프 |
 | GET | `/api/direction` | 없음 | Requirement·Decision·Constraint·Milestone·proposal 목록(권한 상태 포함) | 같음 | 세션 | 없음 | 예 | 없음 |
 | GET | `/api/proposals` | 없음 | `{ proposals[], previews: { [P-id]: ConfirmPreview \| {error[]} } }`(pending만 preview) | 같음 | 세션 | 없음 | 예 | 없음 |
+| GET | `/api/proposals/{P-id}/preview` → `duo.ui.preview/1`(API-05, **IMPLEMENTED(next)**, #54 `81b1b95`) | 없음 | `{ status: "ready", preview: ConfirmPreview, warnings[] }`, 초기화 전이면 `{ status: "not-initialized", message }`, 그 밖에는 `{ status: "failed", diagnostics[] }`. `preview`는 `/api/proposals`의 `previews` 항목과 같고 `preview.digest`를 confirm의 `previewDigest`로 보낸다. 진단 메시지의 이 컴퓨터 절대 경로는 `<repository>`로 바꾼다 | proposal ID 형식(`P-…`)이 아니면 400 `UI_REQUEST_INVALID`. 도메인: `PROPOSAL_NOT_FOUND`, `PROPOSAL_NOT_PENDING`, Truth 권한 오류(`requireCompleteTruth`) | 세션 | 없음(lock·쓰기·repair 없음) | 예 | 없음. preview 뒤 proposal·대체 대상·Truth가 바뀌면 digest가 달라져 confirm이 `DECISION_CONFIRM_PREVIEW_CHANGED`로 거부됨 |
 | POST | `/api/proposals/{P-id}/confirm` | `{ confirmId, previewDigest }`(둘 다 필수) | `{ status: "confirmed", result: { decisionId, path, from, supersedes?, stale?, indexRequired: true, repaired[] }, warnings[] }` 또는 `{ status: "failed", diagnostics[] }` | 400 `UI_CONFIRM_ID_MISMATCH`, `UI_REQUEST_INVALID`. 도메인: `DECISION_CONFIRM_PREVIEW_CHANGED`, `PROPOSAL_NOT_PENDING`, `DECISION_LOCK_BUSY` 등 | 세션 + CSRF. actor `ui:<user.name>`(human 고정) | `D-###.yaml` 생성, 대체 대상 표시, proposal 삭제, metrics 한 줄 | 아니오. 두 번째 호출은 `PROPOSAL_NOT_PENDING(... confirmed as D-###)` | decisions.lock(5000 ms). 본 digest와 다르면 아무것도 쓰지 않음 |
 | POST | `/api/proposals/{P-id}/reject` | `{ reason? }`(최대 2000자) | `{ status: "rejected", result }` 또는 failed | `PROPOSAL_NOT_PENDING`, `DECISION_LOCK_BUSY` | 위와 같음 | proposal 파일에 rejected 기록 | 아니오. 두 번째는 `PROPOSAL_NOT_PENDING` | 같은 lock |
 | GET | `/api/reviews`, `/api/reviews/{review-id}` | 없음 | 기록된 Review 목록·한 건 | 같음 | 세션 | 없음 | 예 | 없음 |
@@ -38,7 +40,7 @@
 | POST | `/api/context` | `{ task, budget? }` | Context 결과 | 도메인 실패(`index-required` 등) | 세션 + CSRF | metrics 한 줄 | 예(결과 동일) | 읽기 |
 | POST | `/api/review` | `{ task?, from?, to?, includeSemanticAssist? }` | Review 결과 | 같음 | 세션 + CSRF | metrics 한 줄 | 예 | 읽기 |
 
-없는 것: Decision 목록·상세 전용 엔드포인트(`direction`·`entity`가 대신함), 단건 preview, 감사 이력, 현재 사용자·권한, proposal 생성·취소, D-### 제자리 confirm(CLI에만 있음).
+없는 것: Decision 목록·상세 전용 엔드포인트(`direction`·`entity`가 대신함. API-02·03은 PR #53에서 리뷰 중), 감사 이력, 현재 사용자·권한, proposal 생성·취소, D-### 제자리 confirm(CLI에만 있음). 단건 preview는 `next`에만 있다(API-05).
 
 ## 3. Confirm 계약에서 반드시 지킬 것
 
@@ -55,7 +57,7 @@
 | API-02 | GET `/api/decisions` → `duo.ui.decisions/1` | `state?`, `q?` | `{ decisions: [{ id, title, state, authority: "CONFIRMED"\|"SUPERSEDED"\|..., locked, lockStatus, supersedes, supersededBy, proposalId?, confirmedAt?, confirmedBy?, origin: "lifecycle"\|"manual" }] }` | 도메인 실패 | 세션 | 없음 | 예 | 없음(현재 데이터로 가능) |
 | API-03 | GET `/api/decisions/{D-id}` | 없음 | API-02 항목 + `lock: LockVerification`, `chain: [{id, state}]`(대체 사슬), `location` | 404 대신 `data.status: "not-found"` | 세션 | 없음 | 예 | 없음 |
 | API-04 | GET `/api/decisions/{D-id}/history` → `duo.ui.decision-history/1` | 없음 | `DecisionHistoryData`(§7): 이벤트와 파일에서 추론한 항목(`derived: true`), 체인 상태, Team Mode 시작 시점. 표시 규칙은 §9 | 같음 | 세션 | 없음 | 예 | BE-AUD-01·05(H-88) |
-| API-05 | GET `/api/proposals/{P-id}/preview` → `duo.ui.preview/1` | 없음 | `ConfirmPreview` | `PROPOSAL_NOT_FOUND`, `PROPOSAL_NOT_PENDING` | 세션 | 없음 | 예 | 없음 |
+| API-05 | GET `/api/proposals/{P-id}/preview` | — | **IMPLEMENTED(next)**, §2로 옮김. 응답은 `ConfirmPreview`를 그대로 주지 않고 `{ status, preview, warnings }`로 감싼다 | — | — | — | — | #54 `81b1b95` |
 | API-06 | POST `/api/proposals/{P-id}/confirm`에 `reason?` 추가 | `{ confirmId, previewDigest, reason? }`(최대 2000자) | 지금과 같음 + `eventId?` | 지금과 같음 + Team Mode `DECISION_ROLE_FORBIDDEN`, `DECISION_AGENT_ENVIRONMENT` | 세션 + CSRF + (Team) 승인자 | 이벤트 1건 추가 | digest 바인딩 유지. 같은 요청 재시도는 `PROPOSAL_NOT_PENDING`이고 이벤트를 더 만들지 않음 | BE-AUD-02, H-88 |
 | API-07 | POST `/api/proposals/{P-id}/withdraw` | `{ reason? }` | `{ status: "withdrawn", result }` | `PROPOSAL_NOT_PENDING`, `PROPOSAL_WITHDRAW_FORBIDDEN` | 세션 + CSRF, 제안자 또는 ADMIN(로컬 UX) | proposal 파일에 withdrawn 기록(스키마 확장 필요) + 이벤트 | 두 번째는 `PROPOSAL_NOT_PENDING` | 스키마 변경이라 H-88 |
 | API-08 | POST `/api/proposals`(사람의 proposal 생성) | `ProposalInput` | `duo.proposal/1` | `PROPOSAL_INVALID` | 세션 + CSRF, actor human | proposal 생성 | 멱등 아님(호출마다 새 P) | ADR-009(UI 쓰기는 confirm·reject뿐) 변경이 필요해 1단계 범위에서 제외 권장 |
@@ -170,7 +172,7 @@ FE는 이 타입으로 mock을 만들어 화면(Jira S15P31A106-311·312·315·3
 |---|---|---|---|
 | 목록·대기 | `decision list` | `GET /api/proposals`, `/api/direction` | `duo_get_status`, `duo_get_decision` |
 | 제안 | 없음 | 없음(API-08 PROPOSED, 1단계 제외) | `duo_propose_decision`(agent) |
-| preview | confirm·reject 안에서 표시 | `/api/proposals`의 `previews`(API-05 PROPOSED) | 없음 |
+| preview | confirm·reject 안에서 표시 | `/api/proposals`의 `previews`, `GET /api/proposals/{P-id}/preview`(API-05, IMPLEMENTED(next)) | 없음 |
 | 확정 | `decision confirm`(TTY), `review-pending` | `POST .../confirm` | **없음(유지)** |
 | 거절 | `decision reject --reason` | `POST .../reject` | **없음(유지)** |
 | 이력 | PROPOSED `decision history` | API-04 PROPOSED | `duo_get_decision`에 이력 요약 추가는 AI-2와 협의(스키마 additive) |
@@ -221,7 +223,7 @@ Local Mode에서는 지금처럼 세션을 가진 같은 컴퓨터의 사용자�
 | 범위 | Mock 가능 | 근거 |
 |---|---|---|
 | Decision 목록·상세(API-02·03) | O | 지금 데이터로 계산 가능, HD 불필요 |
-| 단건 preview(API-05) | O | 기존 `ConfirmPreview` 형식 |
+| 단건 preview(API-05) | O, `next` 빌드의 실제 서버로도 확인 가능 | `{ status: "ready", preview: ConfirmPreview, warnings }` wrapper |
 | 오류 표현(§10의 IMPLEMENTED 코드) | O, 실제 서버로도 확인 가능 | 지금 서버가 냄 |
 | `/api/me`와 신뢰 상태 배지(API-01) | O(mock만) | 필드 이름은 H-88 뒤 확정 |
 | Audit Timeline(API-04) | O(mock만) | 이벤트 형식은 H-88 뒤 확정 |
