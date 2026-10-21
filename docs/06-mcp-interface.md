@@ -149,6 +149,15 @@ inspectAgentIntegration → planAgentIntegration(쓰기 0) → IntegrationPlan �
 | Bridge | `AGENTS.md` | `CLAUDE.md` |
 | 사람 확인 | `requiresProjectTrust`: Codex에서 project를 trust해야 한다. 첫 실행의 trust 질문 또는 사용자 `~/.codex/config.toml`의 `[projects."<path>"] trust_level = "trusted"`, 확인은 Codex의 `/mcp`(DUO는 trust를 바꾸지 않음) | `approvalRequired`: Claude Code가 project 서버 승인을 묻는다. project에서 `claude`를 실행해 workspace trust를 수락하고 서버를 승인한다. 승인 전 `claude mcp get`은 Pending approval, 다시 묻기는 `claude mcp reset-project-choices`(DUO는 승인하지 않음) |
 
+### Tool별 권한 설정
+
+프로젝트 서버 trust/승인은 MCP 서버를 연결하는 절차이고, 개별 Tool 호출 권한은 각 클라이언트 정책으로 정한다. `readOnlyHint` 등 MCP annotation은 동작 설명용 힌트이며 승인 정책을 직접 설정하지 않는다.
+
+- **Claude Code**: `/permissions`에서 `mcp__duo-director__duo_get_context`와 `mcp__duo-director__duo_review_changes`를 각각 `ask`, `allow`, `deny` 규칙에 추가하거나 제거한다. 영구 규칙은 사용자 또는 프로젝트 `settings.json`의 `permissions.ask`, `permissions.allow`, `permissions.deny`에 둘 수 있다. 예를 들어 두 도구를 매번 확인하려면 `"permissions": { "ask": ["mcp__duo-director__duo_get_context", "mcp__duo-director__duo_review_changes"] }`를 설정한다. 이 MCP 도구 이름 형식과 규칙 종류는 Claude Code 공식 [권한 문서](https://code.claude.com/docs/en/permissions)에 따른다. Project 서버 승인은 별도이며, DUO는 `_meta["anthropic/requiresUserInteraction"]`를 설정하지 않아 매 호출 승인을 강제하지 않는다([MCP 문서](https://code.claude.com/docs/en/mcp#require-approval-for-a-specific-tool)).
+- **Codex CLI**: 일반 MCP 서버 설정에서는 `mcp_servers.<id>.default_tools_approval_mode`로 해당 서버의 기본 승인 동작을 정할 수 있고, `enabled_tools`로 노출 도구를 제한할 수 있다. 일반 `mcp_servers`에는 현재 공식 설정 문서상 개별 도구별 승인 재정의가 없다. 도구별 `approval_mode` 예시는 **플러그인에 포함된 MCP 서버** 설정(`plugins.<plugin>.mcp_servers.<server>.tools.<tool>.approval_mode`)에 한정되므로, `duoctl install codex`가 등록하는 일반 DUO MCP 서버에 그대로 적용되지 않는다. 공식 [설정 참조](https://developers.openai.com/codex/config-reference)를 확인한다.
+
+위 예시는 클라이언트에 선택적으로 적용하는 정책이다. 모든 호출에 승인이 뜬다거나 annotation 하나만으로 승인 여부가 결정된다고 단정하지 않는다.
+
 - `duoctl mcp --root-from git-cwd | env:<NAME>`: 이 두 형식만 받는다. 결과는 다시 Git top level로 검증한다(`MCP_ROOT_UNRESOLVED`, `SCAN_ROOT_INVALID`). `--root`와 함께 쓸 수 없다. 설정에 절대 경로가 없으므로 clone·이동 뒤에도 같은 설정이 새 위치의 저장소를 연다.
 - Launcher(`DuoLauncher { kind, command, argsPrefix }`): 기본 `path` = PATH의 `duoctl`(설치된 실행 파일), `--launcher npx` = `npx --no-install duoctl`(project에 `@duo-director/cli`가 설치되어 `node_modules/.bin/duoctl`이 있을 때만. 내려받지 않는다, C162). verify는 launcher provenance(kind, resolved, localBin, 응답한 version)를 보인다. 설정에 개발자의 소스 경로를 쓰지 않는다. 설치 시 Agent가 찾을 수 있는지 확인하고 못 찾으면 `AGENT_LAUNCHER_UNAVAILABLE`로 막는다. 상대 경로 command는 거부, 절대 경로는 API로만 가능하며 이식성 경고를 낸다. 저장소 root에 `duoctl`, `duoctl.cmd` 같은 파일이 있으면(Windows의 process 검색이 작업 디렉터리를 볼 수 있음) conflict다. Windows에서 Codex가 `duoctl.cmd` shim을 `command = "duoctl"`로 실행하는 것을 확인했다.
 - 기존 항목: not-configured(추가), already-configured(unchanged), drifted(DUO 블록이 다름: 갱신), compatible-different-format(다른 모양의 DUO launch: JSON은 확인 후 교체, TOML 블록 밖이면 사람이 지우도록 conflict), conflict(같은 이름의 다른 command, 읽을 수 없는 파일, 깨진 marker, symlink). conflict는 `--yes`로도 덮어쓰지 않는다.
