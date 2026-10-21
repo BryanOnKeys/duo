@@ -200,11 +200,14 @@ T94에서 선택지와 권고를 붙였다. 권고는 설계 제안일 뿐 결�
 | 10 | 기존 저장소 전환(bootstrap PR, §15) | bootstrap 승인 = 기존 Decision 신뢰 출발점 / Decision마다 재확정 | bootstrap 승인 | BE-OPS-03 |
 | 11 | agent 실행 환경 감지 거부(실수 방지) | 넣음 / 넣지 않음 | 공식 문서로 표지를 확인한 뒤 넣음 | BE-GOV-06 |
 | 12 | DUO 저장소 자체에 CODEOWNERS·code owner 리뷰 적용(Jira S15P31A106-246) | 지금 / Team Mode 구현 뒤 | 정책 경로 공동 owner가 2명 이상 정해진 뒤 | 저장소 운영 |
+| 13 | 개인 저장소에서 required workflow를 쓸 수 없는 한계(§16) | 한계를 받아들이고 status check + workflow 경로 code owner 리뷰로 운영 / organization으로 이전해 required workflow 사용 | 개인 저장소에서는 Team Mode의 CI 보호를 "리뷰 의존"으로 명시. 이전 여부는 팀 운영 결정 | Team Mode의 CI 강제 수준 |
+| 14 | 정책 보호 ruleset의 bypass 모드 | `exempt` 금지, 필요하면 `pull_request` / 현행 `always` 유지(잔여 위험) | `exempt` 금지 | DUO 저장소 ruleset 제안(§13.4) |
 
 ## 11. 구현 전에 확인할 사실
 
 - 각 agent가 공식 문서에 남긴 실행 환경 변수(감지 기준). 추측한 변수 이름으로 구현하지 않는다.
 - CI에서 PR 리뷰를 읽는 데 필요한 GitHub 권한과 fork PR에서의 동작
+- (T97) 같은 GitHub Actions 앱 안에서 같은 이름의 job이 필수 check를 채우는지 임시 저장소에서 재현(§16 미검증 행)
 - GitHub의 branch 규칙 조회 API가 읽기 권한으로 무엇을 보여 주는지. 특히 bypass 대상 목록은 관리자 권한 없이 보이지 않을 수 있다. 보이지 않으면 bypass 항목은 `UNVERIFIED`로 둔다.
 - PR의 필수 code owner가 base branch의 CODEOWNERS로 정해지는지(PR이 CODEOWNERS를 바꿔 자기 승인을 만들 수 없는지) 실제 저장소에서 확인
 - 필수 status check가 이름만으로 맞춰질 때, 같은 이름의 다른 workflow job이 성공 status를 낼 수 있는지
@@ -246,7 +249,7 @@ T94에서 선택지와 권고를 붙였다. 권고는 설계 제안일 뿐 결�
 
 | 경로 | 약화되면 생기는 일 | 방어 | 한계 |
 |---|---|---|---|
-| `.github/workflows/**` | `pull_request` workflow는 PR 쪽 정의로 실행되므로, PR이 검증 job을 지우거나 항상 성공하게 바꿀 수 있다 | CODEOWNERS + 필수 code owner 리뷰. 필수 status check로 job 이름 고정(job이 사라지면 check가 오지 않아 병합 불가) | 같은 이름의 다른 job으로 check를 채우는 경로는 §11에서 확인 필요. 리뷰어가 놓치면 통과 |
+| `.github/workflows/**` | `pull_request` workflow는 PR 쪽 정의로 실행되므로, PR이 검증 job을 지우거나 항상 성공하게 바꿀 수 있다. 필수 status check는 이름으로만 맞추므로 같은 이름의 다른 job이 채울 수 있다고 가정한다(§16) | CODEOWNERS + 필수 code owner 리뷰. 필수 status check로 job 이름 고정(job이 사라지면 check가 오지 않아 병합 불가) | 같은 이름의 다른 job으로 check를 채우는 경로는 §11에서 확인 필요. 리뷰어가 놓치면 통과 |
 | CODEOWNERS | PR이 owner를 자기로 바꿔 자기 승인을 만듦 | CODEOWNERS 자체를 owner 대상에 넣음. 필수 owner는 base branch의 파일로 정해지는지 확인(§11) | 관리자 bypass |
 | `.duo-project/governance.yaml` | 자기를 APPROVER로 넣거나 Team Mode를 끔 | owner 대상. 끄는 것도 이 파일 변경이라 리뷰 대상 | 같음 |
 | `.duo-project/decisions/**`(이벤트 포함) | 위조 Decision, 이벤트 수정·삭제 | owner 대상. CI가 lock·이벤트·append-only를 검사(§14) | 리뷰어가 승인하면 들어감 |
@@ -376,3 +379,18 @@ Git email은 기본으로 저장하지 않는다(commit 메타데이터에 이�
 | 0.3.3 클라이언트 | 두 새 파일을 읽지 않고 Local Mode로 동작(§8). 팀 권한은 병합 리뷰가 지킨다 |
 | MCP | 9개 tool 그대로. 확정 도구 없음 |
 
+## 16. GitHub 기능 사실 확인(T95·T97)
+
+근거 수준을 나눠 적는다. **문서 확인**은 GitHub 공식 문서에서 확인한 것, **추론**은 문서 설명에서 끌어낸 판단, **미검증**은 문서로도 실제 저장소로도 확인하지 못한 공격 가능성이다. 실제 ruleset은 바꾸지 않았다.
+
+| 항목 | 내용 | 근거 수준 | 설계 영향 |
+|---|---|---|---|
+| CODEOWNERS 평가 기준 | PR의 필수 code owner는 base branch의 CODEOWNERS로 정해진다. 파일은 `.github/`, 루트, `docs/` 순서로 찾아 처음 것을 쓴다 | 문서 확인([About code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners)) | §13.2의 "PR이 CODEOWNERS를 바꿔 자기 승인을 만든다"는 그 PR 안에서는 막힘. 병합된 뒤의 다음 PR부터 새 owner가 적용되므로 CODEOWNERS 변경 자체는 계속 owner 리뷰 대상 |
+| bypass 모드 | `always`: 직접 push 포함 우회. `pull_request`: PR 병합에서만 우회, branch ruleset 전용. `exempt`: 규칙을 평가하지 않고 bypass 기록도 없음 | 문서 확인([Creating rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository), [REST rules API](https://docs.github.com/en/rest/repos/rules)) | 정책 보호 ruleset에 `exempt` 금지. 우회가 꼭 필요하면 `pull_request`로 기록이 남게 함. 현재 DUO 저장소의 branch ruleset은 모두 `always` |
+| Required workflow | "병합 전 workflow 통과 요구" 규칙은 organization ruleset 기능으로 설명되고, 필수 workflow는 check 이름이 아니라 저장소·branch·workflow 파일로 지정된다 | 문서 확인([Troubleshooting rules](https://docs.github.com/en/enterprise-cloud@latest/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/troubleshooting-rules)) | — |
+| 개인 저장소에서 required workflow 사용 불가 | 개인 계정 저장소에는 organization ruleset이 없으므로 쓸 수 없다고 본다. "개인 저장소에서 쓸 수 없다"는 문장을 직접 찾지는 못했다 | **추론** | 개인 저장소의 Team Mode는 workflow 자체를 외부에서 강제할 수 없음(BLOCKED). organization으로 옮기면 다시 검토 |
+| Required status check와 required workflow의 차이 | status check는 **이름**(과 선택적으로 보고하는 앱)으로 맞춘다. required workflow는 **정해진 workflow 파일**을 실행하게 한다. 앞의 것은 "그 이름의 성공 결과가 왔다"만 보장하고 어떤 코드가 그 결과를 냈는지는 보장하지 않는다 | 문서 확인(위 두 문서) + 설계 해석 | §13.1의 workflow 행: PR이 같은 이름의 job을 다른 내용으로 바꾸면 check는 성공으로 채워질 수 있으므로 `.github/workflows/**` code owner 리뷰가 실제 방어 |
+| check source를 GitHub Actions 앱에 고정 | DUO 저장소의 필수 check는 `integration_id: 15368`(GitHub Actions)로 고정되어 있다. 다른 앱이나 사용자의 commit status로 채우는 것은 막는다 | 실제 설정 확인(T84) | 같은 앱 안의 다른 workflow가 같은 job 이름을 쓰면 구분하지 못할 수 있다(아래 행) |
+| 같은 Actions 앱 안 같은 이름 job의 신뢰 | PR이 새 workflow 파일에 `verify (ubuntu-latest, node 24)` 같은 이름의 job을 만들어 필수 check를 채울 수 있는지 | **미검증**(문서·재현 없음) | 가능하다고 가정하고 workflow 경로를 code owner 리뷰로 보호한다. 임시 저장소에서 T84 방식으로 재현한 뒤 이 행을 갱신 |
+| 자격증명 분리 | agent 실행 환경에 승인·병합·bypass 가능한 토큰이 없어야 함 | 설계 요건(DUO가 확인 불가) | **운영 필수 조건.** 충족을 확인할 수 없으므로 `VERIFIED`도 이를 포함하지 않음 |
+| `VERIFIED`의 의미 | DUO가 읽은 호스트 설정이 §12 조건을 만족한다는 상태 | 설계 | 사람의 신원, 승인 계정 뒤의 실제 사람, 토큰 분리는 보장하지 않음(§12.3) |

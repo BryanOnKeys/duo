@@ -34,6 +34,9 @@ Team Mode의 강한 승인 보장은 아래가 모두 강제될 때만 주장한
 - CODEOWNERS가 정책 경로(`.github/workflows/**`, CODEOWNERS, `governance.yaml`, `decisions/**`, Decision 검증 설정)를 덮고, 경로마다 승인할 수 있는 사람이 작성자 외에 있어야 한다.
 - force push와 branch 삭제가 막혀 있어야 한다.
 - **관리자 bypass는 위협 모델에 포함한다.** bypass를 가진 사람과 그 사람의 토큰은 리뷰 없이 팀 권한을 만들 수 있다. 정책 경로를 다루는 규칙에는 bypass를 두지 않는 것을 권장하고, 남겨 두면 그 경로를 잔여 위험으로 표시한다.
+- GitHub ruleset의 bypass 모드는 세 가지다. `always`는 직접 push를 포함해 우회하고, `pull_request`는 PR 병합에서만 우회하며(branch ruleset 전용), `exempt`는 규칙을 평가하지 않고 bypass 기록도 남기지 않는다. **정책 보호 ruleset에는 `exempt`를 쓰지 않는다.** 남겨야 하면 `pull_request`를 쓴다.
+- 필수 code owner는 PR의 **base branch**에 있는 CODEOWNERS로 정해진다. PR이 CODEOWNERS를 바꿔도 그 PR의 필수 리뷰어는 바뀌지 않는다.
+- 개인 계정 저장소에서는 organization 기능인 required workflow를 쓸 수 없다고 본다(추론, rbac 설계 §16). 개인 저장소의 CI 보호는 이름으로 맞추는 required status check와 `.github/workflows/**`의 code owner 리뷰뿐이다.
 
 ### 3. 자격증명 전제
 
@@ -46,7 +49,7 @@ Team Mode의 강한 승인 보장은 아래가 모두 강제될 때만 주장한
 | 상태 | 뜻 |
 |---|---|
 | `LOCAL` | Local Mode. 팀 권한 주장 없음 |
-| `VERIFIED` | DUO가 호스트 설정을 읽어 §2 조건을 확인했다. §3 자격증명 조건은 포함하지 않는다 |
+| `VERIFIED` | DUO가 호스트 설정을 읽어 §2 조건을 확인했다. **호스트 설정 상태일 뿐 사람의 신원 증명이 아니다.** §3 자격증명 조건은 포함하지 않는다 |
 | `NOT_MET` | 읽었지만 조건이 빠졌다(예: code owner 리뷰 미강제, 정책 경로에 bypass) |
 | `UNVERIFIED` | 권한 부족, 오프라인, 미지원 호스트, API 오류 등으로 확인하지 못했다 |
 
