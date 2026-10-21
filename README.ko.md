@@ -120,7 +120,7 @@ duoctl doctor
 - `duoctl doctor`는 Git, Project Truth, index, 언어별 분석 수준, 연결한 Agent, 선택 LLM 설정을 확인하고 다음 할 일을 1~3개 보여 줍니다. 읽기만 합니다.
 - Agent 설정은 PATH에 있는 `duoctl`을 실행합니다. 예전 전역 설치가 남아 있다면 project 폴더의 일반 터미널에서 `duoctl --version`을 확인하세요. 버전이 달라도 install 검증은 아직 경고하지 않습니다([#40](https://github.com/kanghyunsoon/duo/issues/40)).
 
-로컬 UI(`duoctl ui`)와 LLM 보조는 선택 사항입니다.
+로컬 UI(`duoctl ui`)와 LLM 보조는 선택 사항입니다. 로컬 UI의 [Work map](docs/work-map.md)은 작업과 DUO 그래프의 관련 노드를 보여 줍니다.
 
 ## DUO의 동작
 

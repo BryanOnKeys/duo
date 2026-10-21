@@ -1,15 +1,16 @@
 /**
  * duoctl ui server (T18.1): a local HTTP server that serves the bundled UI and a versioned JSON API
- * over the shared operations. It holds no Project Truth and no UI state: every request loads Truth,
- * opens the current graph read-only and closes it (a CLI index is visible on the next refresh).
+ * over the shared operations. It holds no Project Truth. Graph reads open the current graph
+ * read-only and close it; local work activity is stored as regenerable runtime data.
  *
  * Security (docs/10-security.md): bound to 127.0.0.1; the Host header must name this server
  * (DNS rebinding); a per-run session token arrives once in the launch URL and becomes an HttpOnly,
  * SameSite=Strict cookie (never localStorage, Truth or metrics); every /api request needs it.
  * Mutations are POST only, need a same-origin Origin, application/json and a separate CSRF token that
- * only same-origin script can read (/api/session). No CORS headers. Assets are served from an
- * allowlist held in memory (a request path never reaches the filesystem). A strict CSP allows only
- * this origin. The only writes are Decision confirm and reject through DecisionService.
+ * only same-origin script can read (/api/session). Work activity is regenerable local runtime data.
+ * No CORS headers. Assets are served from an allowlist held in memory (a request path never reaches
+ * the filesystem). A strict CSP allows only this origin. Other UI writes are Decision confirm/reject
+ * through DecisionService and regenerable work activity JSON.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -17,7 +18,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDefaultAnalyzerRegistry, isSecretFileName, readGitUserName, type AnalyzerRegistry } from "@duo-director/analyzer";
-import { createDecisionService, fileRef, normalizeRepoPath, readSourceFile, type Diagnostic, type RepoPath } from "@duo-director/core";
+import { createDecisionService, DEFINITION_ID_PATTERN, fileRef, normalizeRepoPath, readSourceFile, STATE_DIR_NAME, type Diagnostic, type RepoPath } from "@duo-director/core";
 import { appendRuntimeMetric, MAX_BUDGET, MIN_BUDGET, reviewLlmMetric, type ReviewResult, type TokenCountMemo } from "@duo-director/director";
 import { z } from "zod";
 import { LLMProviderPool } from "../llm/factory.js";
@@ -28,6 +29,7 @@ import { diffEnd, projectReview } from "../operations/review.js";
 import { searchEvidence } from "../operations/search.js";
 import { projectDirection, projectEntity, projectOverview, projectProposals, projectReviewHistory } from "./projection.js";
 import { projectProposalPreview } from "./preview.js";
+import { addWorkTask, completeWorkTask, expandWorkNode, listWorkTasks, projectWorkMap, workMapRevision } from "./work-map.js";
 
 export const UI_API_VERSION = "1";
 const MAX_BODY_BYTES = 64 * 1024;
@@ -43,7 +45,7 @@ const TYPES: Readonly<Record<string, string>> = {
   ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2", ".json": "application/json; charset=utf-8",
 };
 /** SPA routes that return index.html (deep links survive a refresh). */
-const PAGES = /^\/(?:|overview|direction|graph|context|review|reviews(?:\/[\w.-]+)?|decisions|coverage|search|entity\/.+)$/u;
+const PAGES = /^\/(?:|overview|direction|graph|work|context|review|reviews(?:\/[\w.-]+)?|decisions|coverage|search|entity\/.+)$/u;
 
 /** The bundled UI: dist/ui next to the published bundle, or packages/ui/dist/app in the workspace. */
 export function locateUiAssets(): string | undefined {
@@ -140,6 +142,10 @@ const SCHEMAS = {
   graph: z.strictObject({ node: text(4096), kind: z.enum(["trace", "impact"]).default("trace"), depth: z.coerce.number().int().min(1).max(3).default(1) }),
   search: z.strictObject({ q: text(200), limit: z.coerce.number().int().min(1).max(50).default(20) }),
   source: z.strictObject({ path: text(4096), start: z.coerce.number().int().min(1), end: z.coerce.number().int().min(1) }),
+  workMap: z.strictObject({ selected: z.union([z.string().uuid(), z.string().regex(/^[0-9a-f]{32}$/u)]).optional() }),
+  workExpand: z.strictObject({ node: text(4096), depth: z.coerce.number().int().min(1).max(3).default(1) }),
+  workTask: z.strictObject({ agent: text(80), name: text(200), issueId: z.string().regex(DEFINITION_ID_PATTERN).optional() }),
+  completeTask: z.strictObject({ id: z.union([z.string().uuid(), z.string().regex(/^[0-9a-f]{32}$/u)]) }),
 } as const;
 
 export async function startDuoUiServer(options: DuoUiServerOptions): Promise<DuoUiServer> {
@@ -158,6 +164,12 @@ export async function startDuoUiServer(options: DuoUiServerOptions): Promise<Duo
   if (registry === undefined) throw new Error((own?.diagnostics ?? []).map((d) => d.message).join("; ") || "no analyzer registry");
   // One registry, one LLM pool and one in-memory token-count memo for the server's lifetime (TASK-019).
   const shared = { registry, llm, tokenCounts: new Map() as TokenCountMemo };
+  const streams = new Set<http.ServerResponse>();
+  let sequence = 0;
+  const publish = (kind: "tasks-changed" | "repository-changed" | "graph-changed") => {
+    const message = `data: ${JSON.stringify({ seq: ++sequence, kind })}\n\n`;
+    for (const stream of streams) stream.write(message);
+  };
   let port = 0;
   const cookieName = () => `duo_ui_${port}`;
   const allowedHosts = () => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
@@ -241,6 +253,37 @@ export async function startDuoUiServer(options: DuoUiServerOptions): Promise<Duo
         const q = parse(SCHEMAS.graph, query);
         return { name: "graph", body: data(await projectGraphQuery(root, q.kind, q.node, q.depth, shared)) };
       }
+      case "work-map": {
+        only("GET");
+        const q = parse(SCHEMAS.workMap, query);
+        return { name: "work-map", body: await projectWorkMap(root, q.selected, shared) };
+      }
+      case "work-revision": {
+        only("GET");
+        return { name: "work-revision", body: { revision: await workMapRevision(root) } };
+      }
+      case "work-expand": {
+        only("GET");
+        const q = parse(SCHEMAS.workExpand, query);
+        return { name: "work-expand", body: await expandWorkNode(root, q.node, q.depth) };
+      }
+      case "work-tasks": {
+        if (method === "GET") return { name: "work-tasks", body: { tasks: listWorkTasks(root) } };
+        only("POST");
+        const body = parse(SCHEMAS.workTask, await readJson(req));
+        const task = addWorkTask(root, { agent: body.agent, name: body.name,
+          ...(body.issueId === undefined ? {} : { issueId: body.issueId }) }, now());
+        publish("tasks-changed");
+        return { name: "work-tasks", body: { task } };
+      }
+      case "work-task-complete": {
+        only("POST");
+        const body = parse(SCHEMAS.completeTask, await readJson(req));
+        const task = completeWorkTask(root, body.id, now());
+        if (task === undefined) throw new HttpError(404, "UI_WORK_TASK_NOT_FOUND", "no such work task");
+        publish("tasks-changed");
+        return { name: "work-tasks", body: { task } };
+      }
       case "search": {
         only("GET");
         const q = parse(SCHEMAS.search, query);
@@ -304,6 +347,14 @@ export async function startDuoUiServer(options: DuoUiServerOptions): Promise<Duo
         if (url.pathname.startsWith("/api/")) {
           const cookie = cookieValue(req.headers.cookie, cookieName());
           if (cookie === undefined || !equal(cookie, session)) throw new HttpError(401, "UI_SESSION_REQUIRED", "no UI session: open the URL printed by duoctl ui");
+          if (url.pathname === "/api/work-events") {
+            if (req.method !== "GET") throw new HttpError(405, "UI_METHOD_NOT_ALLOWED", "events require GET");
+            res.writeHead(200, { ...headers, "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", Connection: "keep-alive" });
+            streams.add(res);
+            res.write(`data: ${JSON.stringify({ seq: sequence, kind: "connected" })}\n\n`);
+            req.on("close", () => streams.delete(res));
+            return;
+          }
           if (req.method !== "GET" && req.method !== "HEAD") {
             const origin = req.headers.origin;
             if (origin === undefined || !allowedOrigins().has(origin)) throw new HttpError(403, "UI_ORIGIN_REJECTED", "cross-origin requests are not accepted");
@@ -349,9 +400,34 @@ export async function startDuoUiServer(options: DuoUiServerOptions): Promise<Duo
     server.listen(options.port ?? 0, "127.0.0.1", () => resolve());
   });
   port = (server.address() as { port: number }).port;
+  let watcher: fs.FSWatcher | undefined;
+  let pending: NodeJS.Timeout | undefined;
+  const taskFile = path.join(root, STATE_DIR_NAME, "runtime", "work-tasks.json");
+  const taskFileChanged = (current: fs.Stats, previous: fs.Stats) => {
+    if (current.mtimeMs !== previous.mtimeMs || current.size !== previous.size) publish("tasks-changed");
+  };
+  // Atomic task writes can surface only the temporary filename through fs.watch on Windows.
+  fs.watchFile(taskFile, { interval: 2000 }, taskFileChanged);
+  try {
+    watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
+      const file = String(filename ?? "").replaceAll("\\", "/");
+      const taskWrite = file === `${STATE_DIR_NAME}/runtime/work-tasks.json` ||
+        (file.startsWith(`${STATE_DIR_NAME}/runtime/work-tasks.json.`) && file.endsWith(".tmp"));
+      if (file === "" || file === STATE_DIR_NAME || /^(?:\.git|node_modules|dist|\.dist)\//u.test(file) ||
+        (file === `${STATE_DIR_NAME}/cache` || file.startsWith(`${STATE_DIR_NAME}/cache/`)) ||
+        file === `${STATE_DIR_NAME}/runtime` ||
+        (file.startsWith(`${STATE_DIR_NAME}/runtime/`) && !taskWrite)) return;
+      if (pending !== undefined) clearTimeout(pending);
+      pending = setTimeout(() => {
+        publish(taskWrite ? "tasks-changed"
+          : file.startsWith(`${STATE_DIR_NAME}/generated/`) ? "graph-changed" : "repository-changed");
+      }, 250);
+    });
+    watcher.on("error", (error) => log(`duoctl ui: work watcher: ${error.message}`));
+  } catch (error) { log(`duoctl ui: work watcher unavailable: ${(error as Error).message}`); }
   let finish = () => {};
   const closed = new Promise<void>((resolve) => { finish = resolve; });
-  server.once("close", () => { own?.value?.dispose(); finish(); });
+  server.once("close", () => { watcher?.close(); fs.unwatchFile(taskFile, taskFileChanged); if (pending !== undefined) clearTimeout(pending); own?.value?.dispose(); finish(); });
   const origin = `http://127.0.0.1:${port}`;
   return {
     port, origin, launchUrl: `${origin}/?session=${session}`, closed,
