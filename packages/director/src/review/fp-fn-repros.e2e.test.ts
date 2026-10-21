@@ -1,20 +1,28 @@
 /**
  * Issue #30 ([VAL-03] / Jira S15P31A106-264..267):
- * Minimal reproductions for the 4 known review false positives and false negatives
- * surfaced in the Value Validation detection matrix:
+ * Minimal reproductions for the 4 known review cases surfaced in the Value Validation
+ * detection matrix (#24):
  *
- * 1. L4 (S15P31A106-264): False positive on importer scope (`forbids.imported_paths` is repository-wide;
- *    `governs.paths` does not narrow `forbids`).
- * 2. D3 (S15P31A106-265): False negative (WARN instead of BLOCK) when adding a second forbidden import
- *    statement in a file that already had a baseline-recorded `File -> File` import edge.
- * 3. L1 (S15P31A106-266): False negative on 1-hop barrel re-exports (`src/db/index.ts` re-exports
- *    `./legacy-db`, UI imports `../db/index`).
- * 4. L2 (S15P31A106-267): False negative and missing limitation on computed/template dynamic imports
- *    (`await import(\`../db/${name}.js\`)` and `await import(\`../db/legacy-db.js\`)`).
+ * 1. L4 (S15P31A106-264 / Follow-up #47): Importer scope contract limit (`forbids.imported_paths`
+ *    is repository-wide per H-72 / T40 N3; `governs.paths` does not narrow `forbids`).
+ *    0.3.3 contract expects BLOCK; #24 benchmark oracle (R1) marks service-layer import compliant.
+ * 2. D3 (S15P31A106-265 / Follow-up #48): False negative (WARN instead of BLOCK) when adding a
+ *    second forbidden import statement in a file that already had a baseline-recorded `File -> File`
+ *    import edge under H-72 pair-level adoption provenance.
+ * 3. L1 (S15P31A106-266 / Follow-up #49): Out of current analyzer scope (`scope.duo: "out"` in #24)
+ *    on 1-hop barrel re-exports (`src/db/index.ts` re-exports `./legacy-db.js`, UI imports `../db/index.js`).
+ * 4. L2 (S15P31A106-267 / Follow-up #50): Out of current analyzer scope (`scope.duo: "out"` in #24)
+ *    and missing `imports-unresolved` limitation on computed dynamic imports (`import(\`../db/${name}.js\`)`),
+ *    plus newly found L2b static no-substitution template literal (`import(\`../db/legacy-db.js\`)`).
  *
- * Scope constraint (Issue #30): Do NOT change production review behavior or PASS/WARN/BLOCK/ASK
- * semantics in this test suite. Passing tests lock down current 0.3.3 root-cause mechanics;
- * `it.todo` entries document the follow-up behavior under consideration for 0.4.
+ * Maintenance rule for pinned tests:
+ * - Passing tests in this file pin current 0.3.3 behavior (`next` = `v0.3.3` product code) without
+ *   altering PASS/WARN/BLOCK/ASK semantics or exit codes.
+ * - A future fix PR must update the corresponding pinned assertion to the new expected value,
+ *   convert the matching `it.todo` in this file into an active test in the same PR, and update the
+ *   status table in `docs/roadmap/0.4.0-issue-30-fp-fn-root-causes.md`.
+ * - Any change that alters review verdicts, Decision schema, or Decision Lock digests must link a
+ *   recorded Maintainer Decision.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -121,7 +129,7 @@ const forbiddenImports = (res: ReviewResult) => res.claims.filter((c) => c.rule 
 const importLimits = (res: ReviewResult) =>
   res.limitations.map((l) => l.code).filter((c) => c.startsWith("imports-"));
 
-describe("Issue #30 (VAL-03): known review false positives and false negatives root-cause reproductions", () => {
+describe("Issue #30 (VAL-03): pinned 0.3.3 behavior for L4, D3, L1 barrel re-export, and L2 dynamic import", () => {
   let repo: ContextRepo;
 
   beforeAll(async () => {
@@ -137,11 +145,10 @@ describe("Issue #30 (VAL-03): known review false positives and false negatives r
     return review(repo);
   };
 
-  describe("Case L4 (S15P31A106-264): false positive on importer scope (governs.paths vs forbids.imported_paths)", () => {
-    it("reproduces L4: service layer importing legacy-db is BLOCKED even though D-001 governs.paths is [src/ui/**]", async () => {
-      // Root cause: `decisionForbidsImport` in `packages/director/src/review/rules.ts` checks all changed files
-      // against `d.forbids.importedPaths` without filtering by the importer's path (`f.path`), because under
-      // H-72 / T40 N3 `governs.paths` does not narrow `forbids`.
+  describe("Case L4 (S15P31A106-264 / #47): contract limit on importer scope (0.3.3 contract: BLOCK vs #24 R1 oracle: compliant)", () => {
+    it("pins current 0.3.3 behavior (L4): service layer importing legacy-db is BLOCKED because forbids.imported_paths is repository-wide under H-72 / T40 N3", async () => {
+      // Root cause: `decisionForbidsImport` in `packages/director/src/review/rules.ts` iterates over `usable`
+      // without filtering by `f.path`, because under H-72 / T40 N3 `governs.paths` does not narrow `forbids`.
       const res = await scenario((r) =>
         r.write(
           "src/services/archive.ts",
@@ -163,18 +170,18 @@ describe("Issue #30 (VAL-03): known review false positives and false negatives r
     });
 
     it.todo(
-      "0.4 candidate (L4): allow scoping forbids.imported_paths to specific importer path globs (or importer_paths) so allowed layers PASS",
+      "0.4 candidate (#47, needs Maintainer Decision): allow scoping forbids.imported_paths by importer path globs so allowed layers PASS",
     );
   });
 
-  describe("Case D3 (S15P31A106-265): false negative when adding a second forbidden import statement in a baseline-exempt file", () => {
-    it("reproduces D3: adding a second import to ../db/legacy-db.js in a legacy file yields WARN (pre-existing-touched) instead of BLOCK", async () => {
+  describe("Case D3 (S15P31A106-265 / #48): false negative when adding a second forbidden import statement in a baseline-exempt file", () => {
+    it("pins current 0.3.3 behavior (D3): adding a second import to ../db/legacy-db.js in a legacy file yields WARN (pre-existing-touched) instead of BLOCK", async () => {
       // Root cause: `headBaselineFindings` (`packages/director/src/adoption/head.ts`) and `decisionForbidsImport`
       // (`packages/director/src/review/rules.ts`) key findings by the pair-level File->File graph edge
-      // (`import:file:src/ui/legacy-orders-page.ts->file:src/db/legacy-db.ts`). A newly added second import
-      // statement in `src/ui/legacy-orders-page.ts` produces the exact same `violationKey` with `touched: true`,
-      // so `makeClaim` (`packages/director/src/review/claims.ts`) classifies it as `pre-existing-touched`
-      // (`blockEligible: false`) and returns WARN instead of BLOCK.
+      // (`import:file:src/ui/legacy-orders-page.ts->file:src/db/legacy-db.ts`) per H-72 adoption provenance.
+      // A newly added second import statement in `src/ui/legacy-orders-page.ts` produces the exact same
+      // `violationKey` with `touched: true`, so `makeClaim` (`packages/director/src/review/claims.ts`)
+      // classifies it as `pre-existing-touched` (`blockEligible: false`) and returns WARN instead of BLOCK.
       const res = await scenario((r) =>
         r.write(
           "src/ui/legacy-orders-page.ts",
@@ -208,15 +215,15 @@ describe("Issue #30 (VAL-03): known review false positives and false negatives r
     });
 
     it.todo(
-      "0.4 candidate (D3): distinguish a newly added import statement from an edited pre-existing import statement in the same source->target file pair",
+      "0.4 candidate (#48, needs Maintainer Decision): distinguish a newly added import statement from an edited pre-existing import statement in the same source->target file pair",
     );
   });
 
-  describe("Case L1 (S15P31A106-266): false negative on 1-hop barrel re-export", () => {
-    it("reproduces L1: importing legacyQuery via barrel src/db/index.ts resolves to src/db/index.ts and returns PASS with no limitation", async () => {
+  describe("Case L1 (S15P31A106-266 / #49): out of current analyzer scope (scope.duo: out in #24) on 1-hop barrel re-export", () => {
+    it("pins current 0.3.3 behavior (L1): importing legacyQuery via barrel src/db/index.ts resolves to src/db/index.ts and returns PASS with no limitation", async () => {
       // Root cause: `readIndexedModuleReferences` (`packages/graph/src/incremental/references.ts`) pairs each
-      // `SourceAnalysis.moduleReferences[j]` with its direct 1-hop module resolution (`src/db/index.ts`), and
-      // `decisionForbidsImport` (`packages/director/src/review/rules.ts`) only matches `ref.target` against
+      // `entry.analysis.moduleReferences[j]` with its direct 1-hop module resolution (`src/db/index.ts`), and
+      // `decisionForbidsImport` (`packages/director/src/review/rules.ts`) only matches `target` against
       // `d.forbids.importedPaths`. Even though `ExportIndex` (`packages/graph/src/build/exports.ts`) follows
       // re-export chains up to `MAX_REEXPORT_DEPTH = 4` for `CALLS` edges, binding-level re-export targets are
       // not stored on module resolutions or checked by `decisionForbidsImport`.
@@ -233,12 +240,12 @@ describe("Issue #30 (VAL-03): known review false positives and false negatives r
     });
 
     it.todo(
-      "0.4 candidate (L1): resolve named/star barrel re-export targets (or surface a limitation) when checking forbids.imported_paths",
+      "0.4 candidate (#49, needs Maintainer Decision): resolve TS/JS barrel re-export targets (or surface a limitation) when checking forbids.imported_paths",
     );
   });
 
-  describe("Case L2 (S15P31A106-267): false negative and missing limitation on computed or template dynamic import", () => {
-    it("reproduces L2a: computed template-literal dynamic import is silently dropped by TS/JS extractor (PASS, 0 claims, 0 limitations)", async () => {
+  describe("Case L2 (S15P31A106-267 / #50): out of current analyzer scope (scope.duo: out in #24) and missing limitation on dynamic import", () => {
+    it("pins current 0.3.3 behavior (L2a): computed template-literal dynamic import is dropped by TS/JS extractor (PASS, 0 claims, 0 limitations)", async () => {
       // Root cause: `Extractor.call` (`packages/analyzer/src/language/tree-sitter/ts-js-extract.ts`, lines 656-664)
       // handles `fn.type === "import"` by checking `if (only?.type === "string") this.module(...)` and immediately
       // returning. A template literal `import(\`../db/${name}.js\`)` has `only.type === "template_string"`, so no
@@ -255,7 +262,7 @@ describe("Issue #30 (VAL-03): known review false positives and false negatives r
       expect(importLimits(res)).toEqual([]);
     });
 
-    it("reproduces L2b: even a static no-substitution template literal import(`../db/legacy-db.js`) is dropped because only.type !== 'string'", async () => {
+    it("pins current 0.3.3 behavior (L2b): static no-substitution template literal import(`../db/legacy-db.js`) is dropped because only.type !== 'string'", async () => {
       // Root cause: `literalText(node)` in `ts-js-extract.ts` supports no-substitution `template_string`,
       // but `Extractor.call` gates `this.module(...)` on `only?.type === "string"` instead of `literalText(only) !== undefined`.
       const res = await scenario((r) =>
@@ -271,7 +278,7 @@ describe("Issue #30 (VAL-03): known review false positives and false negatives r
     });
 
     it.todo(
-      "0.4 candidate (L2): extract no-substitution template literals in import()/require() and emit an unresolved-import limitation for computed dynamic specifiers",
+      "0.4 candidate (#50, needs Maintainer Decision if verdict changes): extract no-substitution template literals in import()/require() and emit an unresolved-import limitation for computed dynamic specifiers",
     );
   });
 });
