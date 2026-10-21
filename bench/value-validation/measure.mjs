@@ -22,19 +22,25 @@ export function medianAll(xs) {
 export const countMeasured = (xs) => xs.filter(isNumber).length;
 
 /**
- * Parses a codex exec --json event stream. usage is null unless at least one turn.completed event carried numeric
- * input and output token counts (an early exit or a cut stream is not a zero-token run); cached is null unless some
- * usage event reported it. Lines that are not JSON are ignored.
+ * Parses a codex exec --json event stream. usage is null unless every turn.completed event carried numeric input and
+ * output token counts: an early exit, a cut stream or one incomplete usage event makes the total NOT MEASURED instead
+ * of a partial sum. cached is null unless every usage event reported cached_input_tokens. Lines that are not JSON are
+ * ignored.
  */
 export function parseEvents(text) {
   const ev = { turns: 0, usage: null, commands: [], fileChanges: 0, mcp: [], checkRuns: 0, failedChecks: 0, reworkCycles: 0, proposals: 0, finalMessage: "" };
-  let input = 0; let output = 0; let cached = null; let failing = false;
+  let input = 0; let output = 0; let cached = 0; let cachedEverywhere = true; let incomplete = false; let failing = false;
   for (const line of text.split(/\r?\n/u)) {
     let e; try { e = JSON.parse(line); } catch { continue; }
     if (e === null || typeof e !== "object") continue;
-    if (e.type === "turn.completed" && e.usage && isNumber(e.usage.input_tokens) && isNumber(e.usage.output_tokens)) {
-      ev.turns++; input += e.usage.input_tokens; output += e.usage.output_tokens;
-      if (isNumber(e.usage.cached_input_tokens)) cached = (cached ?? 0) + e.usage.cached_input_tokens;
+    if (e.type === "turn.completed") {
+      ev.turns++;
+      const u = e.usage;
+      if (u === null || typeof u !== "object" || !isNumber(u.input_tokens) || !isNumber(u.output_tokens)) incomplete = true;
+      else {
+        input += u.input_tokens; output += u.output_tokens;
+        if (isNumber(u.cached_input_tokens)) cached += u.cached_input_tokens; else cachedEverywhere = false;
+      }
     }
     if (e.type !== "item.completed" || e.item === undefined || e.item === null) continue;
     const it = e.item;
@@ -46,7 +52,7 @@ export function parseEvents(text) {
     if (it.type === "file_change") { ev.fileChanges++; if (failing) { ev.reworkCycles++; failing = false; } }
     if (it.type === "agent_message") ev.finalMessage = String(it.text ?? "");
   }
-  if (ev.turns > 0) ev.usage = { input, cached, output };
+  if (ev.turns > 0 && !incomplete) ev.usage = { input, cached: cachedEverywhere ? cached : null, output };
   return ev;
 }
 

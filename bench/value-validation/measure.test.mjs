@@ -1,50 +1,57 @@
-// node --test bench/value-validation/measure.test.mjs
 // Regression tests for the NOT MEASURED rule in the Value Validation 01 measurement helpers (PR #24 review).
-import assert from "node:assert/strict";
-import { test } from "node:test";
+// Runs in the main Vitest suite (vitest.config.ts includes bench/value-validation/**/*.test.mjs), so CI executes it.
+import { describe, expect, it } from "vitest";
 import { agentSummary, countMeasured, medianAll, parseEvents, sumAll } from "./measure.mjs";
 
 const usage = (input, output, cached) => JSON.stringify({ type: "turn.completed", usage: { input_tokens: input, output_tokens: output, ...(cached === undefined ? {} : { cached_input_tokens: cached }) } });
 
-test("a total or median with a missing run is null, and the measured count is reported", () => {
-  assert.equal(sumAll([100, null, 100]), null);
-  assert.equal(sumAll([100, undefined]), null);
-  assert.equal(sumAll([]), null);
-  assert.equal(sumAll([100, 0, 100]), 200);
-  assert.equal(medianAll([3, null, 1]), null);
-  assert.equal(medianAll([3, 1, 2]), 2);
-  assert.equal(medianAll([4, 1, 3, 2]), 2);
-  assert.equal(countMeasured([100, null, 100]), 2);
-});
+describe("Value Validation 01 measurement (NOT MEASURED rule)", () => {
+  it("a total or median with a missing run is null, and the measured count is reported", () => {
+    expect(sumAll([100, null, 100])).toBeNull();
+    expect(sumAll([100, undefined])).toBeNull();
+    expect(sumAll([])).toBeNull();
+    expect(sumAll([100, 0, 100])).toBe(200);
+    expect(medianAll([3, null, 1])).toBeNull();
+    expect(medianAll([3, 1, 2])).toBe(2);
+    expect(medianAll([4, 1, 3, 2])).toBe(2);
+    expect(countMeasured([100, null, 100])).toBe(2);
+  });
 
-test("an event stream without a valid usage event has usage null, not zero", () => {
-  assert.equal(parseEvents("").usage, null);
-  const early = [JSON.stringify({ type: "thread.started" }), JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "hi" } })].join("\n");
-  assert.equal(parseEvents(early).usage, null);
-  assert.equal(parseEvents(JSON.stringify({ type: "turn.completed", usage: {} })).usage, null);
-  assert.equal(parseEvents(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 5 } })).usage, null);
-  assert.equal(parseEvents("not json\n{\"type\":").usage, null);
-});
+  it("an event stream without a valid usage event has usage null, not zero", () => {
+    expect(parseEvents("").usage).toBeNull();
+    const early = [JSON.stringify({ type: "thread.started" }), JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "hi" } })].join("\n");
+    expect(parseEvents(early).usage).toBeNull();
+    expect(parseEvents(JSON.stringify({ type: "turn.completed", usage: {} })).usage).toBeNull();
+    expect(parseEvents(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 5 } })).usage).toBeNull();
+    expect(parseEvents("not json\n{\"type\":").usage).toBeNull();
+  });
 
-test("usage sums every valid turn; cached stays null unless reported; a real zero is kept", () => {
-  assert.deepEqual(parseEvents([usage(10, 2, 4), usage(5, 1, 1)].join("\n")).usage, { input: 15, cached: 5, output: 3 });
-  assert.deepEqual(parseEvents(usage(10, 2)).usage, { input: 10, cached: null, output: 2 });
-  assert.deepEqual(parseEvents(usage(0, 0, 0)).usage, { input: 0, cached: 0, output: 0 });
-  assert.equal(parseEvents([usage(10, 2, 4), "", "garbage"].join("\n")).turns, 1);
-});
+  it("one incomplete usage event among valid ones makes the total null, not a partial sum", () => {
+    expect(parseEvents([usage(10, 2, 4), JSON.stringify({ type: "turn.completed", usage: { input_tokens: 5 } })].join("\n")).usage).toBeNull();
+    expect(parseEvents([usage(10, 2, 4), JSON.stringify({ type: "turn.completed" })].join("\n")).usage).toBeNull();
+  });
 
-test("agentSummary marks a condition NOT MEASURED when one run lacks usage, and counts the measured runs", () => {
-  const runs = [
-    { condition: "A", status: "completed", wallSeconds: 10, usage: { input: 100, cached: 0, output: 10 }, events: { checkRuns: 1, reworkCycles: 0, proposals: 0 }, duo: { contextTokens: null } },
-    { condition: "A", status: "failed", wallSeconds: 12, usage: null, events: { checkRuns: 0, reworkCycles: 0, proposals: 0 }, duo: { contextTokens: null } },
-    { condition: "B", status: "completed", wallSeconds: 8, usage: { input: 50, cached: null, output: 5 }, events: { checkRuns: 2, reworkCycles: 1, proposals: 0 }, duo: { contextTokens: null } },
-  ];
-  const s = agentSummary(runs);
-  assert.equal(s.A.inputTokens, null);
-  assert.equal(s.A.measuredRuns.inputTokens, 1);
-  assert.equal(s.A.totalWallSeconds, 22);
-  assert.equal(s.A.checkRuns, 1);
-  assert.equal(s.B.inputTokens, 50);
-  assert.equal(s.B.cachedInputTokens, null);
-  assert.equal(s.B.contextPacketTokens, null);
+  it("cached is null unless every usage event reported it; complete streams sum; a real zero is kept", () => {
+    expect(parseEvents([usage(10, 2, 4), usage(5, 1, 1)].join("\n")).usage).toEqual({ input: 15, cached: 5, output: 3 });
+    expect(parseEvents([usage(10, 2, 4), usage(5, 1)].join("\n")).usage).toEqual({ input: 15, cached: null, output: 3 });
+    expect(parseEvents(usage(10, 2)).usage).toEqual({ input: 10, cached: null, output: 2 });
+    expect(parseEvents(usage(0, 0, 0)).usage).toEqual({ input: 0, cached: 0, output: 0 });
+    expect(parseEvents([usage(10, 2, 4), "", "garbage"].join("\n")).turns).toBe(1);
+  });
+
+  it("agentSummary marks a condition NOT MEASURED when one run lacks usage, and counts the measured runs", () => {
+    const runs = [
+      { condition: "A", status: "completed", wallSeconds: 10, usage: { input: 100, cached: 0, output: 10 }, events: { checkRuns: 1, reworkCycles: 0, proposals: 0 }, duo: { contextTokens: null } },
+      { condition: "A", status: "failed", wallSeconds: 12, usage: null, events: { checkRuns: 0, reworkCycles: 0, proposals: 0 }, duo: { contextTokens: null } },
+      { condition: "B", status: "completed", wallSeconds: 8, usage: { input: 50, cached: null, output: 5 }, events: { checkRuns: 2, reworkCycles: 1, proposals: 0 }, duo: { contextTokens: null } },
+    ];
+    const s = agentSummary(runs);
+    expect(s.A.inputTokens).toBeNull();
+    expect(s.A.measuredRuns.inputTokens).toBe(1);
+    expect(s.A.totalWallSeconds).toBe(22);
+    expect(s.A.checkRuns).toBe(1);
+    expect(s.B.inputTokens).toBe(50);
+    expect(s.B.cachedInputTokens).toBeNull();
+    expect(s.B.contextPacketTokens).toBeNull();
+  });
 });
