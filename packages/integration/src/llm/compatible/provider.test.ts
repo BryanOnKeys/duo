@@ -2,8 +2,8 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { invokeLLM, type LLMRequest } from "@duo-director/director";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { countTokens, invokeLLM, type LLMRequest } from "@duo-director/director";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { createConfiguredLLMProvider } from "../factory.js";
 import { compatibleClientSettings, createOpenAICompatibleProvider, type CompatibleTransport, type StructuredOutputMode } from "./provider.js";
 
@@ -50,43 +50,49 @@ describe("OpenAICompatibleProvider requests (T27.1)", () => {
     ["chat-completions", "json-schema"], ["chat-completions", "json-object"], ["chat-completions", "prompt-only"],
   ];
 
-  it("each transport × structured_output sends exactly its own fields, once, to the base URL with its prefix, with the key and without following redirects", async () => {
-    for (const [transport, mode] of MATRIX) {
-      const t = fakeFetch(() => json(200, answerFor(transport, JSON.stringify({ answer: "ok" }))));
-      const r = await provider(transport, mode, t.fetchImpl).invoke(structured);
-      const label = `${transport} × ${mode}`;
-      expect(r, label).toMatchObject({ status: "success", output: { mode: "structured", value: { answer: "ok" } }, usage: { provider: "openai-compatible", model: "m-served", inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } });
-      expect(t.calls, label).toHaveLength(1);
-      const c = t.calls[0] as Call;
-      expect(c.url, label).toBe(`${BASE}/${transport === "responses" ? "responses" : "chat/completions"}`);
-      expect(c.authorized, label).toBe(true);
-      expect(c.redirect, label).toBe("manual");
-      expect(c.headers.get("openai-organization"), label).toBeNull();
-      for (const k of ["tools", "tool_choice", "functions", "previous_response_id", "conversation", "stream", "n"]) expect(c.body, label).not.toHaveProperty(k);
-      const strict = { type: "object", additionalProperties: false, required: ["answer"], properties: { answer: { type: "string" } } };
-      if (transport === "responses") {
-        expect(c.body.store, label).toBe(false);
-        expect(c.body).toMatchObject({ model: "m-1", input: "EVIDENCE ev-1", max_output_tokens: 64 });
-        expect(c.body).not.toHaveProperty("messages");
-        expect(c.body).not.toHaveProperty("response_format");
-        if (mode === "json-schema") expect(c.body.text, label).toEqual({ format: { type: "json_schema", name: "check", schema: strict, strict: true } });
-        else if (mode === "json-object") expect(c.body.text, label).toEqual({ format: { type: "json_object" } });
-        else expect(c.body, label).not.toHaveProperty("text");
-        expect(String(c.body.instructions).startsWith("Judge it."), label).toBe(true);
-        expect(String(c.body.instructions).includes("JSON Schema"), label).toBe(mode !== "json-schema");
-      } else {
-        expect(c.body).toMatchObject({ model: "m-1", max_tokens: 64 });
-        expect(c.body).not.toHaveProperty("store");
-        expect(c.body).not.toHaveProperty("text");
-        const messages = c.body.messages as { role: string; content: string }[];
-        expect(messages.map((m) => m.role), label).toEqual(["system", "user"]);
-        expect(messages[1]?.content).toBe("EVIDENCE ev-1");
-        expect(messages[0]?.content.startsWith("Judge it."), label).toBe(true);
-        expect(messages[0]?.content.includes("JSON Schema"), label).toBe(mode !== "json-schema");
-        if (mode === "json-schema") expect(c.body.response_format, label).toEqual({ type: "json_schema", json_schema: { name: "check", schema: strict, strict: true } });
-        else if (mode === "json-object") expect(c.body.response_format, label).toEqual({ type: "json_object" });
-        else expect(c.body, label).not.toHaveProperty("response_format");
-      }
+  // #57: the SDK and invokeLLM's tokenizer load lazily. Initialize these shared real
+  // dependencies as fixture setup, outside the first request's 5 s budget. Keep a
+  // fresh provider/fake fetch per case and Vitest's default hook/test timeouts.
+  beforeAll(async () => {
+    await import("openai");
+    countTokens(structured.instructions);
+  });
+
+  it.each(MATRIX)("%s × %s sends exactly its own fields, once, to the base URL with its prefix, with the key and without following redirects", async (transport, mode) => {
+    const t = fakeFetch(() => json(200, answerFor(transport, JSON.stringify({ answer: "ok" }))));
+    const r = await provider(transport, mode, t.fetchImpl).invoke(structured);
+    const label = `${transport} × ${mode}`;
+    expect(r, label).toMatchObject({ status: "success", output: { mode: "structured", value: { answer: "ok" } }, usage: { provider: "openai-compatible", model: "m-served", inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } });
+    expect(t.calls, label).toHaveLength(1);
+    const c = t.calls[0] as Call;
+    expect(c.url, label).toBe(`${BASE}/${transport === "responses" ? "responses" : "chat/completions"}`);
+    expect(c.authorized, label).toBe(true);
+    expect(c.redirect, label).toBe("manual");
+    expect(c.headers.get("openai-organization"), label).toBeNull();
+    for (const k of ["tools", "tool_choice", "functions", "previous_response_id", "conversation", "stream", "n"]) expect(c.body, label).not.toHaveProperty(k);
+    const strict = { type: "object", additionalProperties: false, required: ["answer"], properties: { answer: { type: "string" } } };
+    if (transport === "responses") {
+      expect(c.body.store, label).toBe(false);
+      expect(c.body).toMatchObject({ model: "m-1", input: "EVIDENCE ev-1", max_output_tokens: 64 });
+      expect(c.body).not.toHaveProperty("messages");
+      expect(c.body).not.toHaveProperty("response_format");
+      if (mode === "json-schema") expect(c.body.text, label).toEqual({ format: { type: "json_schema", name: "check", schema: strict, strict: true } });
+      else if (mode === "json-object") expect(c.body.text, label).toEqual({ format: { type: "json_object" } });
+      else expect(c.body, label).not.toHaveProperty("text");
+      expect(String(c.body.instructions).startsWith("Judge it."), label).toBe(true);
+      expect(String(c.body.instructions).includes("JSON Schema"), label).toBe(mode !== "json-schema");
+    } else {
+      expect(c.body).toMatchObject({ model: "m-1", max_tokens: 64 });
+      expect(c.body).not.toHaveProperty("store");
+      expect(c.body).not.toHaveProperty("text");
+      const messages = c.body.messages as { role: string; content: string }[];
+      expect(messages.map((m) => m.role), label).toEqual(["system", "user"]);
+      expect(messages[1]?.content).toBe("EVIDENCE ev-1");
+      expect(messages[0]?.content.startsWith("Judge it."), label).toBe(true);
+      expect(messages[0]?.content.includes("JSON Schema"), label).toBe(mode !== "json-schema");
+      if (mode === "json-schema") expect(c.body.response_format, label).toEqual({ type: "json_schema", json_schema: { name: "check", schema: strict, strict: true } });
+      else if (mode === "json-object") expect(c.body.response_format, label).toEqual({ type: "json_object" });
+      else expect(c.body, label).not.toHaveProperty("response_format");
     }
   });
 
