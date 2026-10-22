@@ -68,7 +68,7 @@ export function createDuoMcpServer(options: DuoMcpOptions): McpServer {
     ) => void;
     register(name, {
       title: tool.title, description: tool.description, inputSchema: INPUT[name], outputSchema: OUTPUT[name],
-      annotations: { readOnlyHint: tool.readOnly, destructiveHint: false, idempotentHint: tool.readOnly, openWorldHint: false },
+      annotations: { readOnlyHint: tool.readOnly, destructiveHint: tool.destructive ?? false, idempotentHint: tool.readOnly, openWorldHint: false },
     }, async (args: unknown, ctx: ServerContext): Promise<CallToolResult> => {
       const started = Date.now();
       const toolCtx: ToolContext = { root: options.root, agentName: options.agentName ?? "agent", duoSessionId, signal: ctx.mcpReq.signal, llm, tokenCounts, log };

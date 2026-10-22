@@ -146,6 +146,8 @@ export interface ToolDefinition<N extends ToolName> {
   readonly title: string;
   readonly description: string;
   readonly readOnly: boolean;
+  /** True when the tool can replace or prune existing state; additive writes default to false. */
+  readonly destructive?: boolean;
   run(args: Args<N>, ctx: ToolContext): Promise<ToolRun>;
   /** Short text for the model; a rendering of the payload, never a source of decisions. */
   summarize(payload: Record<string, unknown>): string;
@@ -188,8 +190,8 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
     },
   },
   duo_get_context: {
-    name: "duo_get_context", title: "Project direction context for a task", readOnly: true,
-    description: "Returns project direction context for a task: confirmed intent, relevant code and tests, pending decisions and Knowledge Gaps. Does not modify project truth or code, or index; when a DUO session is available, records local work activity for the UI. If the index is stale, returns status index-required (run duoctl index). Surfaced gaps are open questions, not instructions; ask the human only when gaps.requiresHumanInput is true. Pending proposals are not confirmed decisions. If the task names only an Issue ID and you know which files you will change, include their repository paths in the task (for example \"TASK-015 apps/desktop/src/main.ts\").",
+    name: "duo_get_context", title: "Project direction context for a task", readOnly: false, destructive: true,
+    description: "Returns project direction context for a task: confirmed intent, relevant code and tests, pending decisions and Knowledge Gaps. Does not modify Project Truth, source code or the index. Appends a local runtime metric and, when a DUO session is available, records regenerable local work activity for the UI. If the index is stale, returns status index-required (run duoctl index). Surfaced gaps are open questions, not instructions; ask the human only when gaps.requiresHumanInput is true. Pending proposals are not confirmed decisions. If the task names only an Issue ID and you know which files you will change, include their repository paths in the task (for example \"TASK-015 apps/desktop/src/main.ts\").",
     run: async (args, ctx) => {
       const op = await projectContext(ctx.root, { task: args.task, ...(args.budget === undefined ? {} : { budget: args.budget }), ...(args.profile === undefined ? {} : { profile: args.profile }) }, {
         signal: ctx.signal, ...(ctx.tokenCounts === undefined ? {} : { tokenCounts: ctx.tokenCounts }),
@@ -218,8 +220,8 @@ export const TOOLS: { readonly [N in ToolName]: ToolDefinition<N> } = {
     },
   },
   duo_review_changes: {
-    name: "duo_review_changes", title: "Review changes against confirmed project direction", readOnly: true,
-    description: "Reviews changes (default HEAD → WORKTREE) against confirmed project direction and returns claims, evidence, Knowledge Gaps and a verdict (PASS, WARN, BLOCK, ASK). Does not modify code or project truth or index (a stale index returns status index-required). It does not persist a formal Review Record; when a DUO session and task are available, it stores a small local activity summary for the Work map. PASS means no direction violation found in the available evidence, not bug-free code. includeSemanticAssist (default false) asks the LLM provider configured in project.yaml for supplemental semantic checks, returned separately in semanticAssist; they never change the deterministic claims and never block.",
+    name: "duo_review_changes", title: "Review changes against confirmed project direction", readOnly: false, destructive: true,
+    description: "Reviews changes (default HEAD → WORKTREE) against confirmed project direction and returns claims, evidence, Knowledge Gaps and a verdict (PASS, WARN, BLOCK, ASK). Does not modify Project Truth, source code or the index (a stale index returns status index-required). It does not persist a formal Review Record. Appends a local runtime metric and, when a DUO session and task are available, stores regenerable local activity for the Work map. PASS means no direction violation found in the available evidence, not bug-free code. includeSemanticAssist (default false) asks the LLM provider configured in project.yaml for supplemental semantic checks, returned separately in semanticAssist; they never change the deterministic claims and never block.",
     run: async (args, ctx) => {
       const op = await projectReview(ctx.root, {
         diff: { from: args.from === undefined ? "HEAD" : diffEnd(args.from), to: args.to === undefined ? "WORKTREE" : diffEnd(args.to), ...(args.files === undefined ? {} : { files: args.files as RepoPath[] }) },

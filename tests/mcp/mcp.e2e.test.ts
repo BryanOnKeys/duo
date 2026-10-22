@@ -38,11 +38,17 @@ describe("duo-director MCP: protocol, tool list as the permission contract, argu
       expect(t.inputSchema.type).toBe("object");
       expect(t.inputSchema.additionalProperties).toBe(false); // strict: unknown fields are refused
       expect(t.outputSchema?.type).toBe("object");
-      expect(t.annotations?.readOnlyHint).toBe(t.name !== "duo_propose_decision");
+      expect(t.annotations).toEqual({
+        readOnlyHint: !["duo_get_context", "duo_review_changes", "duo_propose_decision"].includes(t.name),
+        destructiveHint: ["duo_get_context", "duo_review_changes"].includes(t.name),
+        idempotentHint: !["duo_get_context", "duo_review_changes", "duo_propose_decision"].includes(t.name),
+        openWorldHint: false,
+      });
     }
     const describe = (n: string) => tools.find((t) => t.name === n)?.description ?? "";
-    expect(describe("duo_get_context")).toMatch(/Does not modify project truth or code, or index.*index-required/su);
-    expect(describe("duo_review_changes")).toContain("Does not modify code or project truth");
+    expect(describe("duo_get_context")).toMatch(/Does not modify Project Truth, source code or the index.*Appends a local runtime metric.*index-required/su);
+    expect(describe("duo_review_changes")).toContain("Does not modify Project Truth, source code or the index");
+    expect(describe("duo_review_changes")).toContain("Appends a local runtime metric");
     expect(describe("duo_review_changes")).toContain("does not persist a formal Review Record");
     expect(describe("duo_propose_decision")).toMatch(/proposal only.*Cannot confirm or reject a decision/su);
   });
@@ -206,7 +212,7 @@ describe("existing project through MCP: freshness, CLI parity, WAL, metrics, pro
     expect((await s.call("duo_search_evidence", { query: "scheduler" })).structuredContent.candidates.length).toBeGreaterThan(0);
   });
 
-  it("metrics: MCP calls append structured entries with surface mcp, no task or source text; read-only tools none", () => {
+  it("metrics: context, review and proposal append structured entries without task or source text", () => {
     const raw = fs.readFileSync(path.join(p.root, ".duo-project", "runtime", "metrics.jsonl"), "utf8");
     const m = raw.trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>).filter((x) => x.surface === "mcp");
     expect(new Set(m.map((x) => x.command))).toEqual(new Set(["duo_get_context", "duo_review_changes", "duo_propose_decision"]));

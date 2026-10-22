@@ -33,17 +33,19 @@ Tool은 9개로 고정한다(H-10). 새 Tool이 필요하면 별도 Spec과 ADR�
 
 ## Tool 목록과 Domain Service
 
-| Tool | Shared operation → service | payload format | 쓰기 | readOnlyHint |
-|---|---|---|---|---|
-| duo_get_status | `projectStatus` → core loader, graph `inspectIndex`, director `getAdoptionBaselineStatus`, core `listDecisionProposals`, integration LLM factory(`LLMProviderPool`, 네트워크 없음) | `duo.status/1` | runtime metric 없음 | true |
-| duo_get_context | `projectContext` → director `compileContext`, Knowledge Gap assessment·renderer | `duo.context/1` | runtime/metrics.jsonl | true |
-| duo_review_changes | `projectReview` → director `reviewChanges` | `duo.review/1`(ReviewResult) | runtime/metrics.jsonl | true |
-| duo_get_requirement | `getRequirement` → core loader, `readSourceSlice` | `duo.requirement/1` | 없음 | true |
-| duo_get_decision | `getDecision` → core loader, `readSourceSlice` | `duo.decision/1` | 없음 | true |
-| duo_trace | `projectGraphQuery("trace")` → graph `trace` | `duo.trace/1` | 없음 | true |
-| duo_impact | `projectGraphQuery("impact")` → graph `impact` | `duo.impact/1` | 없음 | true |
-| duo_search_evidence | `searchEvidence` → Truth 정의, GraphStore `listNodes`, Review Record, Adoption Baseline | `duo.evidence-search/1` | 없음 | true |
-| duo_propose_decision | `proposeDecision` → core `DecisionService.propose`(actor kind agent) | `duo.proposal/1` | decisions/proposals/P-*.yaml, runtime/metrics.jsonl | false |
+| Tool | Shared operation → service | payload format | 쓰기 | readOnlyHint | idempotentHint | destructiveHint |
+|---|---|---|---|---|---|---|
+| duo_get_status | `projectStatus` → core loader, graph `inspectIndex`, director `getAdoptionBaselineStatus`, core `listDecisionProposals`, integration LLM factory(`LLMProviderPool`, 네트워크 없음) | `duo.status/1` | runtime metric 없음 | true | true | false |
+| duo_get_context | `projectContext` → director `compileContext`, Knowledge Gap assessment·renderer | `duo.context/1` | `runtime/metrics.jsonl`; 세션이 있으면 `runtime/work-tasks.json` | false | false | true |
+| duo_review_changes | `projectReview` → director `reviewChanges` | `duo.review/1`(ReviewResult) | `runtime/metrics.jsonl`; task와 세션이 있으면 `runtime/work-tasks.json` | false | false | true |
+| duo_get_requirement | `getRequirement` → core loader, `readSourceSlice` | `duo.requirement/1` | 없음 | true | true | false |
+| duo_get_decision | `getDecision` → core loader, `readSourceSlice` | `duo.decision/1` | 없음 | true | true | false |
+| duo_trace | `projectGraphQuery("trace")` → graph `trace` | `duo.trace/1` | 없음 | true | true | false |
+| duo_impact | `projectGraphQuery("impact")` → graph `impact` | `duo.impact/1` | 없음 | true | true | false |
+| duo_search_evidence | `searchEvidence` → Truth 정의, GraphStore `listNodes`, Review Record, Adoption Baseline | `duo.evidence-search/1` | 없음 | true | true | false |
+| duo_propose_decision | `proposeDecision` → core `DecisionService.propose`(actor kind agent) | `duo.proposal/1` | decisions/proposals/P-*.yaml, runtime/metrics.jsonl | false | false | false |
+
+`readOnlyHint` is false for context, review and proposal because each can write local runtime data or a proposal. `idempotentHint` is false for these same tools because repeated calls may append records or update state; it is true for the other read-only tools. Context and review set `destructiveHint: true` because the bounded Work map activity file can prune old completed or disconnected records when full. Proposal sets it false because it only adds a proposal and metrics; the other tools do not write. Hints describe behavior for the host and do not determine whether a particular client asks for approval.
 
 **권한 계약은 Tool 목록 자체다.** Decision confirm/reject, confirmed Truth 직접 쓰기, Review Record 기록(`recordReview`), Adoption Baseline 캡처·재캡처, index 쓰기 Tool은 없다. Human 확인은 CLI(`duoctl decision`, `review --record`, `init`)와 UI에 남는다([ADR-013](adr/ADR-013-decision-lifecycle.md)). Agent가 이름을 주더라도(`agent` 인자, `--agent`) audit label일 뿐 인증이 아니다.
 
@@ -120,7 +122,7 @@ MCP 요청 취소(client의 `notifications/cancelled`)는 SDK의 `ctx.mcpReq.sig
 
 ## Metrics
 
-context, review, propose 호출은 `runtime/metrics.jsonl`에 `duo.metric/1` 한 줄을 덧붙인다: `surface: "mcp"`, `command`(Tool 이름), `status`, `exitCode`(실패 1, 그 외 0), `durationMs`, `at`, 해당하면 `contextTokens`·`contextBudget`, `reviewVerdict`·`reviewClaims`, `llmCalls`, 의미 보조를 요청했으면 `llmCacheHits`·`semanticStatus`·`llmProvider`·`llmModel`·Provider가 보고한 `llmInputTokens`·`llmOutputTokens`·`llmCachedInputTokens`(비용 계산 없음). task 원문, 소스, diff, proposal 본문은 쓰지 않는다. 읽기 전용 Tool(status, requirement, decision, trace, impact, search)은 쓰지 않는다. metric 쓰기 실패는 stderr 경고일 뿐 Tool 결과를 바꾸지 않는다.
+context, review, propose 호출은 `.duo-project/runtime/metrics.jsonl`에 `duo.metric/1` 한 줄을 덧붙인다: `surface: "mcp"`, `command`(Tool 이름), `status`, `exitCode`(실패 1, 그 외 0), `durationMs`, `at`, 해당하면 `contextTokens`·`contextBudget`, `reviewVerdict`·`reviewClaims`, `llmCalls`, 의미 보조를 요청했으면 `llmCacheHits`·`semanticStatus`·`llmProvider`·`llmModel`·Provider가 보고한 `llmInputTokens`·`llmOutputTokens`·`llmCachedInputTokens`(비용 계산 없음). task 원문, 소스, diff, proposal 본문은 쓰지 않는다. context는 DUO 세션이 있으면 task 활동을, review는 task와 DUO 세션이 모두 있으면 task 및 review 활동 요약을 `.duo-project/runtime/work-tasks.json`에 추가하거나 갱신한다. 활동 잠금 대기는 쓰기당 최대 100 ms다. 해당 로컬 기록은 regenerable runtime state이며 Project Truth, 소스 코드와 인덱스를 바꾸지 않는다. 파일이 128 KiB 한도에 도달하면 오래된 완료·연결 종료 활동 기록이 정리될 수 있다. 쓰기 실패는 stderr 진단만 남기고 Tool 결과를 바꾸지 않는다. context와 review의 `readOnlyHint`·`idempotentHint`는 기록 부작용을 반영해 `false`, `destructiveHint`는 오래된 활동 기록 정리 가능성을 반영해 `true`다. MCP annotation은 host가 호출을 어떻게 설명하거나 확인할지 돕는 metadata이며, 특정 host에서 승인을 반드시 요구하거나 생략한다고 보장하지 않는다.
 
 ## CLI parity (C135)
 
@@ -147,6 +149,15 @@ inspectAgentIntegration → planAgentIntegration(쓰기 0) → IntegrationPlan �
 | Bridge | `AGENTS.md` | `CLAUDE.md` |
 | 사람 확인 | `requiresProjectTrust`: Codex에서 project를 trust해야 한다. 첫 실행의 trust 질문 또는 사용자 `~/.codex/config.toml`의 `[projects."<path>"] trust_level = "trusted"`, 확인은 Codex의 `/mcp`(DUO는 trust를 바꾸지 않음) | `approvalRequired`: Claude Code가 project 서버 승인을 묻는다. project에서 `claude`를 실행해 workspace trust를 수락하고 서버를 승인한다. 승인 전 `claude mcp get`은 Pending approval, 다시 묻기는 `claude mcp reset-project-choices`(DUO는 승인하지 않음) |
 
+### Tool별 권한 설정
+
+프로젝트 서버 trust/승인은 MCP 서버를 연결하는 절차이고, 개별 Tool 호출 권한은 각 클라이언트 정책으로 정한다. `readOnlyHint` 등 MCP annotation은 동작 설명용 힌트이며 승인 정책을 직접 설정하지 않는다.
+
+- **Claude Code**: `/permissions`에서 `mcp__duo-director__duo_get_context`와 `mcp__duo-director__duo_review_changes`를 각각 `ask`, `allow`, `deny` 규칙에 추가하거나 제거한다. 영구 규칙은 사용자 또는 프로젝트 `settings.json`의 `permissions.ask`, `permissions.allow`, `permissions.deny`에 둘 수 있다. 예를 들어 두 도구를 매번 확인하려면 `"permissions": { "ask": ["mcp__duo-director__duo_get_context", "mcp__duo-director__duo_review_changes"] }`를 설정한다. 이 MCP 도구 이름 형식과 규칙 종류는 Claude Code 공식 [권한 문서](https://code.claude.com/docs/en/permissions)에 따른다. Project 서버 승인은 별도이며, DUO는 `_meta["anthropic/requiresUserInteraction"]`를 설정하지 않아 매 호출 승인을 강제하지 않는다([MCP 문서](https://code.claude.com/docs/en/mcp#require-approval-for-a-specific-tool)).
+- **Codex CLI**: 일반 MCP 서버 설정에서는 `mcp_servers.<id>.default_tools_approval_mode`로 서버의 기본 승인 동작을, `mcp_servers.<id>.tools.<tool>.approval_mode`로 특정 Tool의 승인 동작을 정할 수 있다. 따라서 `duoctl install codex`가 등록하는 일반 DUO MCP 서버도 `mcp_servers.<id>.tools.duo_get_context.approval_mode`처럼 Tool별 설정을 사용할 수 있다. 플러그인에 포함된 MCP 서버는 별도 경로인 `plugins.<plugin>.mcp_servers.<server>.tools.<tool>.approval_mode`를 사용한다. 자세한 내용은 공식 [설정 참조](https://learn.chatgpt.com/docs/config-file/config-reference#mcp_serversidtoolstoolapproval_mode)를 확인한다.
+
+위 예시는 클라이언트에 선택적으로 적용하는 정책이다. 모든 호출에 승인이 뜬다거나 annotation 하나만으로 승인 여부가 결정된다고 단정하지 않는다.
+
 - `duoctl mcp --root-from git-cwd | env:<NAME>`: 이 두 형식만 받는다. 결과는 다시 Git top level로 검증한다(`MCP_ROOT_UNRESOLVED`, `SCAN_ROOT_INVALID`). `--root`와 함께 쓸 수 없다. 설정에 절대 경로가 없으므로 clone·이동 뒤에도 같은 설정이 새 위치의 저장소를 연다.
 - Launcher(`DuoLauncher { kind, command, argsPrefix }`): 기본 `path` = PATH의 `duoctl`(설치된 실행 파일), `--launcher npx` = `npx --no-install duoctl`(project에 `@duo-director/cli`가 설치되어 `node_modules/.bin/duoctl`이 있을 때만. 내려받지 않는다, C162). verify는 launcher provenance(kind, resolved, localBin, 응답한 version)를 보인다. 설정에 개발자의 소스 경로를 쓰지 않는다. 설치 시 Agent가 찾을 수 있는지 확인하고 못 찾으면 `AGENT_LAUNCHER_UNAVAILABLE`로 막는다. 상대 경로 command는 거부, 절대 경로는 API로만 가능하며 이식성 경고를 낸다. 저장소 root에 `duoctl`, `duoctl.cmd` 같은 파일이 있으면(Windows의 process 검색이 작업 디렉터리를 볼 수 있음) conflict다. Windows에서 Codex가 `duoctl.cmd` shim을 `command = "duoctl"`로 실행하는 것을 확인했다.
 - 기존 항목: not-configured(추가), already-configured(unchanged), drifted(DUO 블록이 다름: 갱신), compatible-different-format(다른 모양의 DUO launch: JSON은 확인 후 교체, TOML 블록 밖이면 사람이 지우도록 conflict), conflict(같은 이름의 다른 command, 읽을 수 없는 파일, 깨진 marker, symlink). conflict는 `--yes`로도 덮어쓰지 않는다.
@@ -171,4 +182,4 @@ inspectAgentIntegration → planAgentIntegration(쓰기 0) → IntegrationPlan �
 - Remove: `duoctl install remove <agent>`는 DUO 항목과 DUO 블록만 지운다. DUO 내용만 남은 파일은 삭제하고 빈 `.codex/`도 지운다. `.duo-project`, 사람 글, 다른 MCP 서버는 그대로다. Truth Layer 제거 기능은 없다.
 - init 전이면 `AGENT_NOT_INITIALIZED`(종료 코드 5)이며 아무것도 쓰지 않는다. install은 init·index·git add·commit을 하지 않는다. Agent 설정 파일 네 개는 Project Graph 스캔에서 빠진다(duo-agent-integration).
  `tests/mcp/isolation.e2e.test.ts`(T16.1): 테스트 주입(`toolOverrides`, Tool 목록 불변)으로 client 취소 → server AbortSignal → 요청 종료 → 같은 연결의 `duo_get_status` 성공, operation 예외 → 해당 호출만 tool error → 바로 다음 status 성공, raw stdout의 모든 줄이 JSON-RPC frame. `tests/install/install.e2e.test.ts`(T17): 생성된 설정의 command로 실제 DUO stdio 서버를 띄운다.
-`tests/mcp/mcp.e2e.test.ts`: 빌드된 `duoctl mcp`를 stdio subprocess로 띄우고 공식 client로 호출한다. initialize, tools/list(정확히 9개, confirm·reject·record·index Tool 없음, strict 스키마, description 문구), 모든 Tool 호출, 인자 오류, root 검증, stdin 종료, existing-project 흐름(stale → index-required → CLI index → 같은 프로세스에서 ready), WAL checkpoint, propose-only, metrics, dirty baseline provenance의 CLI parity. CI 3 OS에서 실행한다.
+`tests/mcp/mcp.e2e.test.ts`: 빌드된 `duoctl mcp`를 stdio subprocess로 띄우고 공식 client로 호출한다. initialize, tools/list(정확히 9개, annotation 값, confirm·reject·record·index Tool 없음, strict 스키마, description 문구), 모든 Tool 호출, 인자 오류, root 검증, stdin 종료, existing-project 흐름(stale → index-required → CLI index → 같은 프로세스에서 ready), WAL checkpoint, propose-only, metrics, dirty baseline provenance의 CLI parity. CI 3 OS에서 실행한다.
