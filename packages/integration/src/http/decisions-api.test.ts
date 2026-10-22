@@ -284,3 +284,124 @@ describe("damaged or missing Truth (BE-API-02)", () => {
     expect((await get(c, "/api/decisions/D-001")).json().data).toMatchObject({ status: "not-initialized" });
   });
 });
+
+type Problem = { code: string; path?: string; line?: number; message: string };
+const yamlDecision = (id: string, extra: string[]) => [`id: ${id}`, `title: ${id} title`, "question: q", "answer: a", ...extra, ""].join("\n");
+
+describe("per-Decision integrity follows the Decision's own source range (#53 review)", () => {
+  it("a Markdown or YAML self-supersede is invalid on that Decision; a Requirement's error in the same Markdown file and other files' errors are not", async () => {
+    const root = repo({
+      ...PROJECT,
+      // ADR-style Markdown Decision that supersedes itself: the diagnostic is reported inside its frontmatter.
+      ".duo-project/decisions/ADR-030.md": ["---", "id: ADR-030", "type: decision", "title: Self", "state: confirmed", "question: q", "answer: a", "supersedes: ADR-030", "---", "", "# ADR-030 Self", ""].join("\n"),
+      ".duo-project/decisions/D-031.yaml": yamlDecision("D-031", ["state: confirmed", "supersedes: D-031"]),
+      // A valid ADR-style Decision whose file also holds a Requirement section with a broken reference.
+      ".duo-project/specs/ADR-032.md": ["---", "id: ADR-032", "type: decision", "title: Logging", "state: confirmed", "question: logs", "answer: structured", "---", "",
+        "# ADR-032 Logging", "", "## REQ-032 Structured logs", "", "```duo", "type: requirement", "depends_on: [REQ-999]", "```", "", "Logs are JSON.", ""].join("\n"),
+      ".duo-project/decisions/D-033.yaml": yamlDecision("D-033", ["state: confirmed"]),
+    });
+    commit(root);
+    const c = await serve(root);
+    const data = (await list(c)).data as { decisions: (Summary & { integrity: string; problems: Problem[] })[]; truth: { complete: boolean; problems: Problem[] } };
+    const by = Object.fromEntries(data.decisions.map((d) => [d.id, d]));
+    const codes = (id: string) => (by[id]?.problems ?? []).map((x) => x.code);
+
+    // 1. Markdown self-supersede (before: integrity "ok" with problems []).
+    expect(by["ADR-030"]).toMatchObject({ integrity: "invalid" });
+    expect(codes("ADR-030")).toContain("DECISION_SUPERSEDES_SELF");
+    // 2. YAML self-supersede: unchanged behaviour.
+    expect(by["D-031"]).toMatchObject({ integrity: "invalid" });
+    expect(codes("D-031")).toContain("DECISION_SUPERSEDES_SELF");
+    // 3./4. The Requirement's broken reference stays with the Requirement: the ADR around it and other Decisions stay ok.
+    const broken = data.truth.problems.find((x) => x.code === "BROKEN_REFERENCE" && x.path === ".duo-project/specs/ADR-032.md");
+    expect(broken, JSON.stringify(data.truth.problems)).toBeDefined();
+    expect(by["ADR-032"]).toMatchObject({ integrity: "ok", problems: [] });
+    expect(by["D-033"]).toMatchObject({ integrity: "ok", problems: [] });
+    expect(codes("ADR-030")).not.toContain("BROKEN_REFERENCE");
+    expect(codes("D-031").filter((x) => x === "DECISION_SUPERSEDES_SELF")).toHaveLength(1);
+
+    // 5. Truth-wide errors and per-Decision integrity agree: every Decision problem is a Truth problem.
+    expect(data.truth.complete).toBe(false);
+    const key = (x: Problem) => [x.code, x.path ?? "", x.line ?? "", x.message].join("|");
+    const truthKeys = new Set(data.truth.problems.map(key));
+    for (const d of data.decisions) for (const x of d.problems) expect(truthKeys.has(key(x)), d.id + " " + key(x)).toBe(true);
+
+    // The detail answers the same as the list.
+    for (const id of ["ADR-030", "D-031", "ADR-032", "D-033"]) {
+      const detail = (await get(c, "/api/decisions/" + id)).json().data as { decision: { integrity: string; problems: Problem[] } };
+      expect({ integrity: detail.decision.integrity, problems: detail.decision.problems }, id).toEqual({ integrity: by[id]?.integrity, problems: by[id]?.problems });
+    }
+  });
+});
+
+describe("supersession chain limit is explicit (#53 review)", () => {
+  /** A valid chain base+1 → … → base+n: each older Decision is superseded by the next one. */
+  const chainFiles = (base: number, n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => {
+    const id = `D-${base + i + 1}`;
+    const extra = [i === n - 1 ? "state: confirmed" : "state: superseded"];
+    if (i > 0) extra.push(`supersedes: D-${base + i}`);
+    if (i < n - 1) extra.push(`superseded_by: D-${base + i + 2}`);
+    return [`.duo-project/decisions/${id}.yaml`, yamlDecision(id, extra)];
+  }));
+  type Detail = { chain: { id: string; missing?: true; loop?: true }[]; truncated: { older: boolean; newer: boolean } };
+  let c: Client;
+  const detail = async (id: string) => ((await get(c, "/api/decisions/" + id)).json().data as { decision: Detail }).decision;
+  const ids = (d: Detail) => d.chain.map((x) => x.id);
+
+  beforeAll(async () => {
+    const root = repo({
+      ...PROJECT, ...chainFiles(400, 64), ...chainFiles(500, 65), ...chainFiles(600, 66),
+      ".duo-project/decisions/D-701.yaml": yamlDecision("D-701", ["state: confirmed", "supersedes: D-799"]),
+      ".duo-project/decisions/D-711.yaml": yamlDecision("D-711", ["state: confirmed", "supersedes: D-712"]),
+      ".duo-project/decisions/D-712.yaml": yamlDecision("D-712", ["state: confirmed", "supersedes: D-711"]),
+    });
+    commit(root);
+    c = await serve(root);
+  });
+
+  it("a short chain is whole and not truncated", async () => {
+    const d2 = (await get(good, "/api/decisions/D-002")).json().data.decision as Detail;
+    expect(ids(d2)).toEqual(["D-001", "D-002"]);
+    expect(d2.truncated).toEqual({ older: false, newer: false });
+  });
+
+  it("64 and 65 Decisions (63 and 64 links from an end) are returned whole: reaching the limit exactly is not truncation", async () => {
+    for (const [first, last, n] of [["D-401", "D-464", 64], ["D-501", "D-565", 65]] as const) {
+      for (const id of [first, last]) {
+        const d = await detail(id);
+        expect(d.chain, id).toHaveLength(n);
+        expect([ids(d)[0], ids(d).at(-1)], id).toEqual([first, last]);
+        expect(d.truncated, id).toEqual({ older: false, newer: false });
+      }
+    }
+  });
+
+  it("66 Decisions: from the newest end the oldest is omitted and older is true; from the oldest end newer is true; the middle is whole", async () => {
+    const newest = await detail("D-666");
+    expect(newest.chain).toHaveLength(65);
+    expect(ids(newest)[0]).toBe("D-602");
+    expect(ids(newest)).not.toContain("D-601");
+    expect(newest.truncated).toEqual({ older: true, newer: false });
+    // A client continues from the last returned ID in that direction.
+    expect(ids(await detail("D-602"))[0]).toBe("D-601");
+
+    const oldest = await detail("D-601");
+    expect(oldest.chain).toHaveLength(65);
+    expect(ids(oldest).at(-1)).toBe("D-665");
+    expect(oldest.truncated).toEqual({ older: false, newer: true });
+
+    const middle = await detail("D-633");
+    expect(middle.chain).toHaveLength(66);
+    expect([ids(middle)[0], ids(middle).at(-1)]).toEqual(["D-601", "D-666"]);
+    expect(middle.truncated).toEqual({ older: false, newer: false });
+  });
+
+  it("missing and loop markers are unchanged and are not truncation", async () => {
+    const missing = await detail("D-701");
+    expect(missing.chain).toEqual([{ id: "D-799", missing: true }, { id: "D-701", state: "confirmed", authority: "CONFIRMED" }]);
+    expect(missing.truncated).toEqual({ older: false, newer: false });
+    const loop = await detail("D-711");
+    expect(loop.chain).toEqual([{ id: "D-711", loop: true }, { id: "D-712", state: "confirmed", authority: "CONFIRMED" }, { id: "D-711", state: "confirmed", authority: "CONFIRMED" }]);
+    expect(loop.truncated).toEqual({ older: false, newer: false });
+  });
+});
