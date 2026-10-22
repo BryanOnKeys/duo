@@ -28,7 +28,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: "duo",
-          include: ["packages/*/src/**/*.test.ts", "packages/*/src/**/*.test.tsx", "apps/*/src/**/*.test.ts", "tests/**/*.test.ts"],
+          include: ["packages/*/src/**/*.test.ts", "packages/*/src/**/*.test.tsx", "apps/*/src/**/*.test.ts", "tests/**/*.test.ts", "bench/value-validation/**/*.test.mjs"],
           exclude: [...exclude, ...agentLaunch],
           sequence: { groupOrder: 0 },
         },
