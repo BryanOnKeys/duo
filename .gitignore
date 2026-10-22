@@ -10,3 +10,6 @@ Thumbs.db
 .env.*
 /tmp/
 /bench/results/local/
+/.duo-a11y-runs/
+/fixtures/languages/java-spring/target/classes/com/
+/fixtures/languages/java-spring/target/test-classes/
