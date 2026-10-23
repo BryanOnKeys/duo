@@ -5,6 +5,7 @@
  * pinned Playwright Chromium in CI, or installed Chrome/Edge locally). Skipped locally without a browser.
  */
 import { execFileSync } from "node:child_process";
+import { AxeBuilder } from "@axe-core/playwright";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,7 +16,7 @@ import { captureAdoptionBaseline } from "@duo-director/director";
 import { indexRepository, openProjectGraphStore } from "@duo-director/graph";
 import { LLMProviderPool, startDuoUiServer, type DuoUiServer } from "@duo-director/integration";
 import { completeWorkTask, recordWorkReview, touchWorkTask } from "../../packages/integration/src/http/work-map.js";
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 });
@@ -23,6 +24,7 @@ const FIXTURES = fileURLToPath(new URL("../../fixtures/", import.meta.url));
 const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "Dev", GIT_AUTHOR_EMAIL: "dev@duo.invalid", GIT_COMMITTER_NAME: "Dev", GIT_COMMITTER_EMAIL: "dev@duo.invalid" };
 const temps: string[] = [];
 const servers: DuoUiServer[] = [];
+const contexts: BrowserContext[] = [];
 let registry: AnalyzerRegistry;
 let browser: Browser | undefined;
 
@@ -64,7 +66,9 @@ function repo(fixture: string, extra: (root: string) => void = () => {}) {
 async function open(root: string): Promise<{ page: Page; server: DuoUiServer; foreign: string[]; errors: string[] }> {
   const server = await startDuoUiServer({ root, version: "e2e", registry, llm: new LLMProviderPool({}) });
   servers.push(server);
-  const page = await (browser as Browser).newPage();
+  const context = await (browser as Browser).newContext();
+  contexts.push(context);
+  const page = await context.newPage();
   const foreign: string[] = [];
   const errors: string[] = [];
   page.on("request", (r) => { if (!r.url().startsWith(server.origin)) foreign.push(r.url()); });
@@ -109,6 +113,18 @@ describe("DUO UI in a browser (T18.1)", () => {
     const nodes = page.locator(".react-flow__node");
     const count = await nodes.count();
     expect(count).toBeGreaterThan(1);
+    const graph = page.locator(".work-canvas");
+    expect(await graph.count()).toBe(1);
+    expect(await graph.getAttribute("role")).toBe("region");
+    expect(await graph.getAttribute("aria-label")).toBe("Work and DUO relationship graph");
+    const taskNode = page.getByRole("button", { name: /\[Codex\] Refresh flow/u });
+    expect(await taskNode.count()).toBe(1);
+    expect(await taskNode.getAttribute("aria-pressed")).toBe("true");
+    const accessibleNode = page.getByRole("button", { name: /\[Codex\] Refresh flow/u }).first();
+    expect(await accessibleNode.getAttribute("role")).toBe("button");
+    expect(["true", "false"]).toContain(await accessibleNode.getAttribute("aria-pressed"));
+    const accessibility = await new AxeBuilder({ page }).withRules(["nested-interactive"]).analyze();
+    expect(accessibility.violations).toEqual([]);
     expect(await page.getByText("Loading…").count()).toBe(0);
     expect(errors).toEqual([]);
   });

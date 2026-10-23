@@ -70,9 +70,9 @@ function SyncSelectedNodes({ ids }: { readonly ids: readonly string[] }) {
       const selected = new Set(ids);
       const next = nodes.map((node) => {
         const isSelected = selected.has(node.id);
-        if (node.selected === isSelected) return node;
+        if (node.selected === isSelected && node.domAttributes?.["aria-pressed"] === isSelected) return node;
         changed = true;
-        return { ...node, selected: isSelected };
+        return { ...node, selected: isSelected, domAttributes: { ...node.domAttributes, "aria-pressed": isSelected } };
       });
       return changed ? next : nodes;
     });
@@ -161,6 +161,7 @@ function placement(nodes: readonly WorkNode[], edges: readonly WorkEdge[], selec
     return {
       id: n.id, position: savedPositions.get(n.id) ?? positions.get(n.id) ?? { x: 32, y: nextY }, draggable: true, selectable: true,
       className: `work-node work-node--${kind}${active ? " work-node--focus" : ""}${muted ? " work-node--muted" : ""}`,
+      ariaRole: "button", domAttributes: { "aria-pressed": false },
       style: { width: n.type === "task" ? 270 : 248 },
       data: { label: <div className="work-node-body" title={n.label}>
         <div className="work-node-top"><span className="work-node-dot" /><span>{kind === "task" ? "AGENT WORK" : kind.toUpperCase()}</span>{active ? <span className="work-node-live">CURRENT</span> : null}</div>
@@ -343,7 +344,7 @@ export function WorkPage() {
             <div className="work-graph-head"><div><strong>Relationship map</strong><p>Selected work is the tree root. Drag nodes to arrange the map.</p></div>
               <div className="work-legend"><span className="work-legend-task">Work</span><span className="work-legend-document">Document</span><span className="work-legend-file">Code</span><span className="work-legend-test">Test</span></div>
             </div>
-            <div className="work-canvas" role="img" aria-label="Work and DUO relationship graph"
+            <div className="work-canvas" role="region" aria-label="Work and DUO relationship graph"
               onKeyDownCapture={(event) => {
                 const target = event.target;
                 const node = target instanceof Element ? target.closest<HTMLElement>(".react-flow__node") : null;
