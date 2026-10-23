@@ -13,7 +13,7 @@ const exclude = ["**/node_modules/**", "tests/distribution/**", "tests/openai-sm
  * tools/list and duo_get_status together). They run as a second group, after every other test file has finished,
  * so the probe is not measured against the start-up storm of the whole parallel suite. The probe timeout is unchanged.
  */
-const agentLaunch = ["tests/install/install.e2e.test.ts", "tests/cli/doctor.e2e.test.ts"];
+const agentLaunch = ["tests/install/install.e2e.test.ts", "tests/install/launcher.e2e.test.ts", "tests/cli/doctor.e2e.test.ts"];
 
 export default defineConfig({
   resolve: {

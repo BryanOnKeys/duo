@@ -308,3 +308,7 @@ DUO 실행 파일 설치, 저장소 초기화, Agent 연결은 서로 다른 단
 | global 설치 | package 70개, 약 83.8 MB(대부분 `typescript`, `gpt-tokenizer`) | package 70개, 약 93.6 MB; T12B: 71개, 약 113.5 MB(`openai` 7.23.0 약 20 MB, tarball 1,250,899 B) |
 
 0.2.1(H-65): tarball 24,333,166 B, unpacked 114,025,940 B, 7,468 files(bundled `node_modules/` 67 package, 7,443 files). global 설치의 디스크 사용량은 0.2.0과 거의 같다(Windows, npm 11: 0.2.0 registry 설치 7,481 files 113,917,442 B, bundled 방식 7,479 files 113,876,352 B). 다운로드만 커진다.
+
+### Launcher 검증 보정 (#40-2/40-3, 미출시)
+
+측정한 runner 환경의 기본 `path` launcher는 주입된 `node_modules/.bin`을 제외한 같은 PATH로 plan·lookup·MCP probe를 수행한다. launcher가 없으면 성공으로 표시하지 않고 `--launcher npx`를 안내한다(plan 차단은 exit 6, 적용 후 verify 실패는 exit 1). 실행 CLI와 MCP 서버 버전이 알려진 비어 있지 않은 문자열로 서로 다르면 JSON의 선택적 `verify.warnings`에 `launcher-version-mismatch`, 두 버전, 해석된 경로, 두 해결 방법을 추가하고 사람이 읽는 en/ko 출력에도 표시한다. 경고만으로 기존 성공/종료 코드를 바꾸지 않으며 기존 MCP 실패를 가리지 않는다. 빈 버전은 unknown이고 정확한 문자열만 비교한다. 지원 runner와 pnpm dlx 등 남은 범위는 [설계 및 실측 기록](roadmap/issue-40-launcher-verification-design.md)을 따른다.

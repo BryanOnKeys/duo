@@ -1,12 +1,13 @@
-# Issue 40-1: launcher verification design
+# Issue 40-1 through 40-3: launcher verification
 
-Status: BE-1 design review received; documentation revisions only. Decisions D1 and D2 below await maintainer confirmation before 40-2 starts. Keep the PR in draft until both decisions are posted.
+Status: D1 and D2 settled by the maintainer on PR #75. 40-2 and 40-3 implementation is in this draft; keep it in draft until implementation and validation are complete. Release authorization is separate.
 Date: 2026-10-23. Source baseline: `next` `6c6c872`.
 Issue: [#40](https://github.com/kanghyunsoon/duo/issues/40).
 Brief: [T91](https://github.com/kanghyunsoon/duo/issues/40#issuecomment-6284137321).
 Review: [BE-1 feedback](https://github.com/kanghyunsoon/duo/pull/75#issuecomment-6355715433).
+Policy: [maintainer D1/D2 decisions](https://github.com/kanghyunsoon/duo/pull/75#issuecomment-6356707094).
 
-This change records the reproduction and proposed implementation boundary. It changes no production behavior, launcher selection, configuration, output format or exit code.
+40-1 recorded a resolution-only reproduction and design. 40-2 now applies the measured-runner PATH policy consistently to planning, lookup and probing. 40-3 adds the agreed version warning. The compatibility section records changed success/exit outcomes; generated configurations stay portable.
 
 ## Reproduction
 
@@ -28,65 +29,72 @@ Both Codex and Claude Code adapters keep `command: "duoctl"`; generating the con
 
 The current verification path confirms the second cause by inspection: `verifyAgentIntegration` uses the supplied host for `checkLauncher` and forwards the same PATH to `probeMcpLaunch`. It records `probe.serverVersion`, but its `ok` only checks configuration, bridge, launcher availability, server name and tools. No running CLI version is passed in or compared. Doctor displays the returned version but also accepts `verify.ok` without comparison.
 
-## Proposed behavior (decisions pending)
+## Settled behavior (D1 and D2)
 
 | Situation | Install verification | Doctor |
 |---|---|---|
-| Launcher and running CLI versions match | Existing checks determine success | Existing verified status only if checks pass |
-| Known, non-empty versions differ | **D2 pending:** add `launcher-version-mismatch`, both versions and resolved path; the warning itself preserves the result of existing checks and its exit code | Proposed warning and safe next action; do not hide existing errors |
-| Probe skipped/failed, or either version missing or `""` | No mismatch claim; retain existing failure/offline behavior | Existing failure/offline behavior |
-| Filtered agent PATH contains no `duoctl` | **D1 pending:** choose verification failure or preservation of `ok` with a warning suggesting `--launcher npx`; see the alternatives below | No server version is available; unavailable-launcher handling follows the confirmed policy |
+| Launcher and running CLI versions match | Existing checks determine success; no mismatch warning | Existing checks apply |
+| Known, non-empty versions differ | Add `launcher-version-mismatch`, CLI/server versions, resolved path and both safe next steps; warning alone preserves the existing result/exit code | Dedicated mismatch warning remains 40-4 follow-up |
+| Probe skipped/failed, or either version missing or `""` | No mismatch claim; existing failures stay failures | Existing failure/offline behavior |
+| Effective agent PATH contains no `duoctl` | Fail, never report `Verify: ok`; recommend reinstalling with `--launcher npx` | Existing unavailable-launcher error through shared verification |
 
-Use the existing MCP initialize version, not an additional `--version` subprocess. Pass the running CLI version explicitly from the CLI into integration and doctor; never import CLI internals into a package. Existing internal callers without that version must not invent one.
+### D1: no launcher on the agent PATH (settled: fail)
 
-A missing version includes `undefined` and the empty string: `probe.serverVersion` is `""` when initialize reports no version (`packages/integration/src/mcp/probe.ts`). Compare exact version strings only when both are present and non-empty. Do not interpret semver ranges or normalize versions to manufacture a match or mismatch.
+DUO installed only as a devDependency followed by `npx duoctl install codex` with the default `path` launcher previously verified through an injected project-local binary, although an agent outside that runner had no `duoctl`.
 
-### D1: no launcher on the agent PATH (decision pending)
+The effective PATH now makes `checkLauncher` return `available: false`. The existing pre-apply plan blocks installation with `EXIT.ACTION_REQUIRED` (6), writes no integration configuration and includes the `--launcher npx` recommendation. Direct verification of an existing configuration returns `verify.ok: false`, does not probe an unavailable executable, and adds `duoctl install <agent> --launcher npx` to next actions. A failure reached after apply still uses the existing `EXIT.ERROR` (1) verification branch. The alternative of preserving `ok` for an unavailable launcher was not adopted.
 
-The common example is DUO installed only as a project devDependency, followed by `npx duoctl install codex` with the default `path` launcher. Today's installer resolves the injected project-local binary, but the agent outside that runner has no `duoctl`. After filtering, `checkLauncher` returns `available: false` and no MCP probe can run.
+### D2: version-mismatch warning (settled)
 
-The maintainer must choose between:
+The CLI passes its package version through `VerifyOptions.cliVersion`. The MCP initialize response supplies the actual server version; no additional `--version` subprocess or upward package dependency is added. Missing caller versions and the probe's empty-string version mean unknown. Only exact, non-empty strings are compared, without semver-range interpretation or normalization.
 
-1. **Fail verification:** keep the unavailable-launcher check failing, so `verify.ok` is false and the install verification branch returns `EXIT.ERROR` (`apps/cli/src/commands/install.ts`). This reports the real inability to start the agent's launcher, but changes success/exit behavior for an installation that currently verifies through the injected local binary.
-2. **Preserve `ok` with a warning:** explicitly approve an exception for this unavailable-launcher case and suggest reinstalling with `--launcher npx`. This preserves the previous success result, but the configured PATH launcher still cannot start until the user takes that action. Do not describe it as a successful MCP launch or a verified server version.
+`AgentIntegrationVerification.warnings` is an optional additive array; each mismatch entry contains `code: "launcher-version-mismatch"`, `cliVersion`, `serverVersion`, `resolved` and two `nextActions`. Human install output renders the facts and safe actions in en/ko. Safe actions are to update the global DUO installation to the running CLI version, or reinstall with `duoctl install <agent> --launcher npx` for a project dependency. Neither action executes automatically.
 
-Neither alternative is selected or implemented by this note.
+Warnings never override `checks.every(...)`: unavailable launchers, wrong server names, incompatible tool lists and failed MCP launches remain failures. Doctor-specific mismatch facts/output remain 40-4 work; its existing internal call without `cliVersion` makes no mismatch claim.
 
-### D2: version-mismatch warning (decision pending)
+## Recorded runner evidence and selected PATH rule
 
-The proposal is to retain the existing check result and add `launcher-version-mismatch` with the running CLI version, actual server version, resolved path and both safe next steps. A version warning alone does not make a successful verification fail, and it does not turn an existing failure into success. BE-1 considers this consistent with T91; final maintainer confirmation is still pending.
+The actual Windows measurements are in [issue-40-runner-evidence.json](issue-40-runner-evidence.json). They were recorded **before** selecting the predicate, with Node 24.18.0, npm 12.0.1, pnpm 11.25.0 and Yarn Classic 1.22.22. Each runner ran in an independent fresh PowerShell process to avoid cross-command environment effects. `null` means unset. The raw record includes all three marker values and the ordered PATH prefix; personal/fixture path components are replaced with placeholders. The inherited PATH suffix was verified identical and omitted.
 
-Safe next steps are suggestions only: update the global installation to the running version, or reinstall with explicit `--launcher npx` when DUO is a project dependency. Do not automatically update packages, switch launchers or rewrite an absolute executable path into shared configuration.
+| Actual runner | `npm_command` | `npm_execpath` (suffix; full normalized value in record) | `npm_lifecycle_event` | Coverage |
+|---|---|---|---|---|
+| `npx --no-install duo-runner-env-probe` | `exec` | `npm/bin/npm-cli.js` | `npx` | Covered |
+| `npm exec --offline -- duo-runner-env-probe` | `exec` | `npm/bin/npm-cli.js` | `npx` | Covered |
+| `npm run probe --silent` | `run` | `npm/bin/npm-cli.js` | `probe` | Covered |
+| `pnpm exec duo-runner-env-probe` | `exec` | unset | unset | Covered; injected relative `./node_modules/.bin` is also removed |
+| `pnpm --package <local-tarball> dlx duo-runner-env-probe` | unset | unset | unset | **Gap:** cannot identify from these markers; retains current behavior |
+| Yarn 1 `yarn --silent run probe` | unset | `yarn/bin/yarn.js` | `probe` | Covered |
 
-## PATH rule and runner evidence required for 40-2
+Selected activation for a `path` launcher: `npm_command` is `exec` or `run`, or a non-empty `npm_lifecycle_event` accompanies an `npm_execpath` ending in `yarn.js`. This is deliberately limited to the measured signatures. npm versions reporting `run-script`, Yarn Berry/PnP, other runner versions and actual POSIX runner invocations are not validated coverage. The marker-free pnpm dlx case remains unfixed; it is not inferred to be supported.
 
-For a `path` launcher, planning, executable lookup and the MCP probe must use the same effective host. Under a covered runner, filter the runner-added `node_modules/.bin` entries (project, ancestor projects and cache); preserve the order of all other entries and Windows PATHEXT semantics. Keep explicit `npx` and absolute custom launchers unchanged.
+Planning and verification share `effectiveLauncherHost`; executable lookup and the MCP probe use that same effective environment. It removes normalized terminal `node_modules/.bin` directory entries, including project, ancestor and cache bins, while keeping the other entries in order. Windows case/separators/PATH-key casing and PATHEXT are preserved; POSIX path matching is case-sensitive. Explicit `npx` and custom/absolute launchers retain the original PATH. The supplied host and real process environment are never mutated, and no machine path is written into generated config.
 
-The initial candidate `host.env.npm_command === "exec"` targets `npx` and `npm exec`; it is not a final activation predicate. `npm run <script>` may use `run-script`, and the other runners may expose different markers. Choose the predicate from real invocations recorded during 40-2, after D1 and D2 are confirmed. If the predicate does not fire, verification keeps today's behavior and that runner's stale-launcher case remains unfixed.
+This approximates an agent outside the runner. A runner cannot identify which identical PATH entries were already present, and GUI agents may inherit a different PATH. Non-bin helper directories added by runners are left intact.
 
-For **each** runner below, the 40-2 test notes must record the runner version and OS, the actual `npm_command`, `npm_execpath` and `npm_lifecycle_event` values (including unset values), and the relevant PATH order. No real runner invocation has been measured in 40-1; the fake-host resolution test is not runner evidence.
+### Reproducing the measurements
 
-| Runner | Environment-marker evidence | Coverage claim at this design stage |
-|---|---|---|
-| `npx` | Not measured; record all three markers in 40-2 | Initial candidate target; not verified |
-| `npm exec` | Not measured; record all three markers in 40-2 | Initial candidate target; not verified |
-| `npm run <script>` | Not measured; record all three markers in 40-2 | Not claimed by the initial candidate |
-| `pnpm exec` | Not measured; record all three markers in 40-2 | Not claimed by the initial candidate |
-| `pnpm dlx` | Not measured; record all three markers in 40-2 | Not claimed by the initial candidate |
-| `yarn` | Not measured; record the exact subcommand and all three markers in 40-2 | Not claimed by the initial candidate |
+Create a tiny package `duo-runner-env-probe@1.0.0`, with bin `duo-runner-env-probe` pointing to executable `probe.cjs`:
 
-The final test notes must explicitly list covered runners and remaining gaps. An unavailable runner is recorded as not tested, not inferred to be supported. Once activation is chosen, recognize directory entries by normalized terminal path segments `node_modules/.bin`, with platform-appropriate separators and Windows case handling; do not inspect or modify the real process environment in the policy helper.
+```js
+#!/usr/bin/env node
+const path = require("node:path");
+const env = process.env;
+const key = Object.keys(env).find(k => k.toUpperCase() === "PATH");
+console.log(JSON.stringify({node: process.version, npm_command: env.npm_command ?? null,
+  npm_execpath: env.npm_execpath ?? null, npm_lifecycle_event: env.npm_lifecycle_event ?? null,
+  PATH: (env[key] ?? "").split(path.delimiter)}, null, 2));
+```
 
-This is an approximation, not recovery of the agent's original environment: runners do not identify which identical PATH entries were already present, and a GUI-launched agent may have another PATH. BE-1 must review the activation and filtering boundary. Do not remove arbitrary bin directories or claim equivalence with every GUI environment.
+Pack it with `npm pack --ignore-scripts` and install the local tarball as a devDependency of an isolated project, with script `"probe": "duo-runner-env-probe"`. Run the six commands in the table from that project, separately. The dlx command points at the same local tarball. Yarn 1.22.22 was installed only into an isolated tools prefix and invoked through its `bin/yarn.js`; no global package/provider configuration was changed. The probe only prints environment data; it does not run DUO, an LLM or a paid experiment.
 
 ## Compatibility boundary
 
-The current 40-1 documentation and resolution test change no production behavior. The planned 40-2 PATH correction can change verification success and exit codes:
+40-1 alone changed no production behavior. The 40-2 PATH correction can change verification success and exit codes:
 
-- The previously hidden no-launcher case can fail; its exact policy is pending D1.
+- The previously hidden no-launcher case now fails under D1: pre-apply planning blocks with exit 6; a reached verification failure returns exit 1. No unavailable launcher is reported as verified.
 - An actual older global binary can start but expose a different tool list. The existing `mcp-launch` check compares its tools with this build's `EXPECTED_MCP_TOOLS` (and checks the server name), so verification can now fail where probing the injected local binary currently passes. Keep that validation intact and report the real result; the install verification branch then returns `EXIT.ERROR`.
 
-The unchanged-success/exit-code claim applies only to adding the 40-3 version-mismatch warning itself, pending D2. It is not a promise for 40-2 or the whole issue. A matching or unknown version does not override a failed launcher, server-name or tool-list check.
+The unchanged-success/exit-code claim applies only to adding the 40-3 version-mismatch warning itself, as confirmed in D2. It is not a promise for 40-2 or the whole issue. A matching or unknown version does not override a failed launcher, server-name or tool-list check.
 
 ## Change reach
 
@@ -94,8 +102,8 @@ The unchanged-success/exit-code claim applies only to adding the 40-3 version-mi
 |---|---|
 | `packages/integration/src/agents/launcher.ts` | Pure effective-host policy, shared by planning and verification |
 | `packages/integration/src/agents/integration.ts` | Use the same effective host for lookup/probe; compare supplied runtime version; additive warning |
-| `packages/integration/src/agents/types.ts` | Additive verification warning fields; any unavailable-launcher exception requires D1 confirmation |
-| `packages/integration/src/operations/doctor.ts` | Forward the runtime version supplied by the CLI; add the proposed mismatch warning without downgrading failed checks |
+| `packages/integration/src/agents/types.ts` | Optional additive version-warning facts; missing launchers fail under D1 |
+| `packages/integration/src/operations/doctor.ts` | 40-4 follow-up: forward the runtime version supplied by the CLI; add mismatch facts and remediation without downgrading failed checks |
 | `apps/cli/src/commands/install.ts`, `doctor.ts`, `messages.ts` | Pass version; render versions, resolved path and safe actions in en/ko |
 | Agent unit, CLI install and doctor tests | Fake PATH/version cases for both adapters; Windows and POSIX CI |
 | CLI/MCP documentation | Explain the diagnostic, safe remediation and GUI PATH limitation |
@@ -105,12 +113,12 @@ No schema migration, new MCP tool, MCP tool schema change, Decision authority ch
 ## Work split and acceptance evidence
 
 1. **40-1 (1 SP):** this note and deterministic resolution reproduction; BE-1 review before production implementation.
-2. **40-2 (2 SP):** after D1 and D2 confirmation, measure real runner markers, state coverage, implement the reviewed effective-host policy and lookup/probe consistency with targeted tests, including the no-launcher case.
-3. **40-3 (2 SP):** after D2 confirmation, additive version-mismatch warning and CLI rendering; test exact strings, missing/empty versions and existing failures. The warning itself does not change the result/exit code of the existing checks.
+2. **40-2 (2 SP):** implemented: recorded six real runner environments, stated coverage/gaps, shared effective-host policy and targeted no-launcher/lookup/probe tests.
+3. **40-3 (2 SP):** implemented: additive version-mismatch warning and en/ko CLI rendering; tests cover exact strings, missing/empty versions and existing failures. The warning itself does not change the result/exit code of the existing checks.
 4. **40-4 (2 SP):** doctor warning, facts and en/ko remediation.
 5. **40-5 (3 SP):** real subprocess regression with fake older server for Codex and Claude Code, explicit npx/custom launchers, missing agent-PATH launcher, removal, offline and missing/empty versions.
 
-A resolution-only test is not proof that the configured process reports the expected version. The subprocess and CLI checks above remain required before closing #40. Draft PRs target `next`; D1 and D2 must be posted before 40-2 starts, and the PR stays in draft until both are confirmed. Publishing 0.3.4 is a separate maintainer decision.
+A resolution-only test is not proof that the configured process reports the expected version. The subprocess and CLI checks above remain required before closing #40. Draft PRs target `next`; D1 and D2 are confirmed; the PR stays in draft until implementation and validation are complete. Publishing 0.3.4 is a separate maintainer decision.
 
 ## Client and model boundary
 
@@ -118,13 +126,20 @@ A resolution-only test is not proof that the configured process reports the expe
 
 [#31](https://github.com/kanghyunsoon/duo/issues/31) separately asks whether the real Claude Code client starts DUO, exposes tools and calls them during a task. A gateway-backed setup must record client version, gateway version, actual upstream model, tool-search settings and launch environment. A non-Claude model cannot establish Claude-model behavior or an ordinary supported Claude Code baseline. Do not change global client/provider settings or run paid/account-consuming tasks as part of 40-1.
 
-## Validation record
+## Historical 40-1 validation record
 
 Windows, Node 24.18.0, pnpm 11.25.0; source baseline `6c6c872`.
 
 - Existing Agent unit tests: 18 passed before adding the reproduction.
 - Combined existing and reproduction tests: 2 files, 20 passed (2 new resolution cases).
 - Workspace typecheck, targeted ESLint and package boundary checks: passed.
-- Documentation validation after BE-1 revisions: passed (120 Markdown files). This revision changes documentation only; the recorded code-test results above were not rerun.
-- Not tested: an actual npm-exec invocation, a versioned MCP subprocess/installed CLI mismatch, real Codex/Claude Code task behavior, or POSIX execution. The fake-host predicate and full regression matrix still need their own evidence.
-- No model/API experiment, global PATH change, provider change or production implementation.
+- Documentation validation after the BE-1 documentation revision: passed (120 Markdown files); code-test results were not rerun for that earlier documentation-only commit.
+- At the 40-1 stage, real runner invocations and versioned MCP subprocesses were not tested. Current evidence and validation are recorded separately above/below. Real client and POSIX runner execution remain untested.
+- No model/API experiment, global PATH change or provider change. 40-2/40-3 production implementation and its current validation are recorded below.
+
+## 40-2/40-3 validation
+
+- Before the fix: 4 regression failures across both adapters reproduced local/global resolution and missing-launcher false success; 2 explicit npx controls passed.
+- After the final Windows PATH-key fix: 50 agent tests passed, including runner-evidence signatures, PATH boundary handling, unknown/exact versions, failure preservation and existing adapter/removal tests.
+- Built CLI subprocess tests: 8 passed for Codex/Claude Code configurations, JSON and en/ko warning output, missing launchers, matching/empty versions and incompatible tool lists. Final workspace check results are recorded in PR #75. New real-probe CLI cases join the existing `agent-launch` test group (C254) rather than the parallel startup storm; the product probe timeout is unchanged.
+- Actual Codex/Claude Code clients, POSIX runner measurements and paid AI experiments remain not tested; 40-4/40-5 and release authorization remain separate.

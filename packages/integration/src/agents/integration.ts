@@ -17,11 +17,11 @@ import { SERVER_NAME, isDuoLaunch, type AgentIntegrationAdapter } from "./adapte
 import { BRIDGE_MARKERS, bridgeLines, inspectBridge } from "./bridge.js";
 import { claudeCodeAdapter } from "./claude-code.js";
 import { codexAdapter } from "./codex.js";
-import { checkLauncher, currentHost, launcherDisplay, NPX_LAUNCHER, PATH_LAUNCHER, type HostEnvironment } from "./launcher.js";
+import { checkLauncher, currentHost, effectiveLauncherHost, launcherDisplay, NPX_LAUNCHER, PATH_LAUNCHER, type HostEnvironment } from "./launcher.js";
 import { findBlock, removeBlock, upsertBlock } from "./managed-block.js";
 import {
   AGENT_IDS, type AgentId, type AgentIntegrationPlan, type AgentIntegrationState, type AgentIntegrationVerification, type BridgeStatus, type DuoLauncher,
-  type FileAction, type IntegrationConflict, type IntegrationStatus, type McpInspection, type VerifyCheck,
+  type FileAction, type IntegrationConflict, type IntegrationStatus, type McpInspection, type VerifyCheck, type LauncherVersionMismatchWarning,
 } from "./types.js";
 
 const ADAPTERS: Readonly<Record<AgentId, AgentIntegrationAdapter>> = { codex: codexAdapter, "claude-code": claudeCodeAdapter };
@@ -114,7 +114,7 @@ export function planAgentIntegration(root: string, agent: AgentId, options: Plan
   const conflicts: IntegrationConflict[] = [];
   const warnings: string[] = [];
   if (!initialized(root)) blockers.push(createDiagnostic("AGENT_NOT_INITIALIZED", `${root} is not a DUO project yet: run duoctl init first (install never initializes)`));
-  const launch = checkLauncher(root, launcher, options.host ?? currentHost());
+  const launch = checkLauncher(root, launcher, effectiveLauncherHost(launcher, options.host ?? currentHost()));
   blockers.push(...launch.diagnostics);
   warnings.push(...launch.warnings);
 
@@ -287,6 +287,8 @@ export async function applyAgentIntegration(root: string, plan: AgentIntegration
 }
 
 export interface VerifyOptions {
+  /** Running CLI version, supplied by the caller; omitted/empty means unknown. */
+  readonly cliVersion?: string;
   readonly host?: HostEnvironment;
   /** Start the configured launch and call initialize, tools/list, duo_get_status (default true). */
   readonly launch?: boolean;
@@ -298,11 +300,12 @@ export interface VerifyOptions {
 /** Checks the installed integration: the files parse, hold the planned entry and block, the launcher resolves, the server answers. */
 export async function verifyAgentIntegration(root: string, agent: AgentId, options: VerifyOptions = {}): Promise<AgentIntegrationVerification> {
   const adapter = ADAPTERS[agent];
-  const host = options.host ?? currentHost();
   const checks: VerifyCheck[] = [];
+  const warnings: LauncherVersionMismatchWarning[] = [];
   const mcpText = readTarget(root, adapter.mcpTarget).text;
   const entry = mcpText === undefined ? undefined : adapter.readEntry(mcpText);
   const launcher = launcherOf(entry) ?? PATH_LAUNCHER;
+  const host = effectiveLauncherHost(launcher, options.host ?? currentHost());
   const inspection = adapter.inspect(mcpText, adapter.plannedEntry(launcher));
   checks.push({ name: "config-parse", ok: mcpText !== undefined && !(inspection.status === "conflict" && inspection.current === undefined), ...(mcpText === undefined ? { detail: `${adapter.mcpTarget} is missing` } : inspection.reason === undefined ? {} : { detail: inspection.reason }) });
   checks.push({ name: "server-entry", ok: inspection.status === "already-configured", detail: inspection.status });
@@ -320,6 +323,12 @@ export async function verifyAgentIntegration(root: string, agent: AgentId, optio
     });
     if (probe.ok) {
       version = probe.serverVersion;
+      if (options.cliVersion && version && options.cliVersion !== version && launch.resolved !== undefined) {
+        warnings.push({
+          code: "launcher-version-mismatch", cliVersion: options.cliVersion, serverVersion: version, resolved: launch.resolved,
+          nextActions: [`Update the global DUO installation to ${options.cliVersion}.`, `duoctl install ${agent} --launcher npx`],
+        });
+      }
       const status = probe.status as { index?: { status?: string } | null; baseline?: { status?: string } | null } | null;
       server = { name: probe.serverName, tools: probe.tools, index: status?.index?.status ?? null, baseline: status?.baseline?.status ?? null };
       // The expected tools come from this build's tool table (T26.1), not a hard-coded count.
@@ -331,6 +340,7 @@ export async function verifyAgentIntegration(root: string, agent: AgentId, optio
     }
   }
   const nextActions: string[] = [];
+  if (!launch.available && launcher.kind === "path") nextActions.push(`duoctl install ${agent} --launcher npx`);
   if (server !== undefined && options.callStatus !== false && server.index !== "current") nextActions.push(`${launcherDisplay(launcher)} index`);
   if (adapter.projectTrustRequired) nextActions.push("Trust this project in Codex so it loads .codex/config.toml (the trust prompt on first launch, or trust_level = \"trusted\" in ~/.codex/config.toml); then /mcp in Codex lists duo-director.");
   if (adapter.approvalRequired) nextActions.push("Run claude in this project and approve the duo-director server; until then claude mcp get duo-director shows Pending approval.");
@@ -339,12 +349,12 @@ export async function verifyAgentIntegration(root: string, agent: AgentId, optio
     ...(launch.resolved === undefined ? {} : { resolved: launch.resolved }), ...(launch.localBin === undefined ? {} : { localBin: launch.localBin }),
     ...(version === undefined ? {} : { version }),
   };
-  return { format: "duo.agent-integration-verify/1", agent, ok: checks.every((c) => c.ok), checks, launcher: provenance, ...(server === undefined ? {} : { server }), nextActions };
+  return { format: "duo.agent-integration-verify/1", agent, ok: checks.every((c) => c.ok), checks, launcher: provenance, ...(warnings.length === 0 ? {} : { warnings }), ...(server === undefined ? {} : { server }), nextActions };
 }
 
 /** PATH (and PATHEXT on Windows) from the host, so the probe resolves the launcher like the agent would. */
 function pathEnv(host: HostEnvironment): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(host.env)) if (v !== undefined && (k.toUpperCase() === "PATH" || k.toUpperCase() === "PATHEXT")) out[k] = v;
+  for (const [k, v] of Object.entries(host.env)) if (v !== undefined && (k.toUpperCase() === "PATH" || k.toUpperCase() === "PATHEXT")) out[k.toUpperCase()] = v;
   return out;
 }
