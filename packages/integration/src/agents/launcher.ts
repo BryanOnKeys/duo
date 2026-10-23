@@ -22,8 +22,10 @@ export const currentHost = (): HostEnvironment => ({ env: process.env, platform:
 /** Approximate the agent PATH only for measured runners; never change the caller's environment (#40). */
 export function effectiveLauncherHost(launcher: DuoLauncher, host: HostEnvironment): HostEnvironment {
   const env = host.env;
-  const runner = env.npm_command === "exec" || env.npm_command === "run"
-    || (Boolean(env.npm_lifecycle_event) && /(?:^|[\\/])yarn\.js$/u.test(env.npm_execpath ?? ""));
+  const value = (name: string) => env[host.platform === "win32" ? Object.keys(env).find((k) => k.toLowerCase() === name) ?? name : name];
+  const command = value("npm_command");
+  const runner = command === "exec" || command === "run"
+    || (Boolean(value("npm_lifecycle_event")) && /(?:^|[\\/])yarn\.js$/u.test(value("npm_execpath") ?? ""));
   if (launcher.kind !== "path" || !runner) return host;
   const key = Object.keys(env).find((k) => host.platform === "win32" ? k.toUpperCase() === "PATH" : k === "PATH");
   if (key === undefined) return host;

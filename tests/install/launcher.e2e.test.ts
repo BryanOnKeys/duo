@@ -46,7 +46,12 @@ for (const agent of ["codex", "claude-code"] as const) {
       resolved = server(global, "0.2.0", EXPECTED_MCP_TOOLS);
     });
     const args = ["install", agent, "--yes", "--non-interactive"];
-    function env() { return { ...envWithPath([local, global]), npm_command: "exec" }; }
+    function env(dirs = [local, global], keepPath = true) {
+      const inherited = envWithPath(dirs, keepPath);
+      // Vitest exposes uppercase Windows env keys; native spawn must receive just one npm_command key.
+      const clean = Object.fromEntries(Object.entries(inherited).filter(([k]) => k.toLowerCase() !== "npm_command"));
+      return { ...clean, npm_command: "exec" };
+    }
 
     it("launches the older global server, warns in JSON/en/ko and retains exit 0", () => {
       const json = duoctl(p.root, [...args, "--json"], "", env());
@@ -82,7 +87,7 @@ for (const agent of ["codex", "claude-code"] as const) {
     });
 
     it("blocks local-only PATH before writing and never prints Verify: ok", () => {
-      const missing = { ...envWithPath([local], false), npm_command: "exec" };
+      const missing = env([local], false);
       const result = duoctl(p.root, [...args, "--json"], "", missing);
       expect(result.code).toBe(6);
       expect(result.json().result.plan).toMatchObject({ applicable: false, requirements: { duoctlAvailable: false } });

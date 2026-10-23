@@ -47,7 +47,7 @@ describe("measured runner activation and PATH boundaries", () => {
     });
   }
   it("normalizes terminal segments only, keeps order and PATHEXT, supports Windows Path casing without mutation", () => {
-    const env = { Path: "C:\\A\\NODE_MODULES\\.BIN\\;C:\\first;C:/cache/node_modules/./.bin;C:\\node_modules\\.bin-extra;C:\\last", PATHEXT: ".CMD;.EXE", npm_command: "exec" };
+    const env = { Path: "C:\\A\\NODE_MODULES\\.BIN\\;C:\\first;C:/cache/node_modules/./.bin;C:\\node_modules\\.bin-extra;C:\\last", PATHEXT: ".CMD;.EXE", NPM_COMMAND: "exec" };
     const result = effectiveLauncherHost(PATH_LAUNCHER, { platform: "win32", env });
     expect(result.env.Path).toBe("C:\\first;C:\\node_modules\\.bin-extra;C:\\last");
     expect(result.env.PATHEXT).toBe(env.PATHEXT);
@@ -89,7 +89,7 @@ for (const adapter of [codexAdapter, claudeCodeAdapter]) {
       const f = fixture();
       installed(f.root);
       probe.mockResolvedValue({ ok: true, serverName: "duo-director", serverVersion: "0.3.3", tools: EXPECTED_MCP_TOOLS, status: null });
-      await verifyAgentIntegration(f.root, adapter.id, { host: { platform: "win32", env: { Path: f.host.env.PATH, PATHEXT: ".CMD;.EXE", npm_command: "exec" } } });
+      await verifyAgentIntegration(f.root, adapter.id, { host: { platform: "win32", env: { Path: f.host.env.PATH, PATHEXT: ".CMD;.EXE", NPM_COMMAND: "exec" } } });
       expect(probe.mock.calls[0]?.[0].env).toMatchObject({ PATH: f.global });
       expect(probe.mock.calls[0]?.[0].env).not.toHaveProperty("Path");
     });
