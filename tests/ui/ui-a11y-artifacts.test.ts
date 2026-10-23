@@ -2,13 +2,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assessTable, atomicWriteJson, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, serializeAuditError, storeAuditRecord } from "./ui-a11y-artifacts.js";
+import { assessTable, atomicWriteJson, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, sanitizeAuditArtifact, serializeAuditError, storeAuditRecord } from "./ui-a11y-artifacts.js";
 
 const tempDirs: string[] = [];
 function tempDir(): string { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duo-a11y-artifacts-")); tempDirs.push(dir); return dir; }
 afterEach(() => { for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe("UI accessibility audit artifacts", () => {
+  it("removes private paths, git details, and nested error text from shareable output", () => {
+    const secret = "C:\\Users\\private\\repo\\secret.ts /home/private/repo/secret.ts \\\\server\\private";
+    const artifact = sanitizeAuditArtifact({ cwd: secret, gitStatus: secret, id: "case", error: { name: "Error", message: secret, stack: secret, cause: { message: secret }, errors: [secret] }, detail: "fixture result" }) as Record<string, unknown>;
+    expect(JSON.stringify(artifact)).not.toContain("private");
+    expect(artifact).toMatchObject({ id: "case", error: { name: "Error", message: "[redacted]" }, detail: "fixture result" });
+  });
   it("preserves nested, aggregate and cyclic errors with bounded strings", () => {
     const root = new Error("root");
     const aggregate = new AggregateError([new Error("child"), root], "aggregate", { cause: root });

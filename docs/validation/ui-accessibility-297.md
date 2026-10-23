@@ -75,3 +75,11 @@ Jira 이슈 `S15P31A106-297`은 조회 가능했다. 앞서 단축 키 `297`로 
 | 실행 ID | 결과 | 필수 화면 누락 | 제품 문제 | 미검증 | Jira 반영 |
 |---|---|---:|---:|---:|---|
 | `2026-10-21T07-32-30-472Z-14612` | 실행 완료; `accessibilityVerificationComplete: false` | 0 | 30 사례 | 78 사례, 108개 미검증 finding 및 스크린리더 | `S15P31A106-297`에 기록; 수동 확인 후 상태 결정 |
+
+## 공유 산출물 정제 (2026-10-23)
+
+공유 요약과 사례 JSON/JSONL은 `schemaVersion: 3`이다. 공유본은 `cwd`, `gitStatus`, 오류 메시지·스택·중첩 오류 원문을 제거하며 오류 메시지는 `[redacted]`로 표시한다. 로컬 원본 진단은 `DUO_A11Y_LOCAL_DIAGNOSTICS=1`을 설정한 경우에만 `.duo-a11y-runs/local-diagnostics/<runId>/`에 저장한다. 스크린샷은 고정 감사 fixture에서 생성하며 외부 공유 전에 사람이 화면 내용을 확인해야 한다.
+
+최신 실행 `2026-10-23T00-08-53-025Z-30420`: 총 120건, 누락 0, 중복 0, 도구 오류 0, 제품 문제 30건, 미검증 상태 78건(미검증 finding이 포함된 사례 108개). `executionComplete: true`, `accessibilityVerificationComplete: false`.
+
+정제 요약 예시: `{"schemaVersion":3,"caseCount":120,"executionComplete":true,"accessibilityVerificationComplete":false}`.

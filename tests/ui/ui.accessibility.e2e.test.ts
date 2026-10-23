@@ -7,7 +7,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { AxeBuilder } from "@axe-core/playwright";
-import { assessTable, atomicWriteText, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, serializeAuditError, storeAuditRecord, writeAuditSummary, type AuditRecord, type AuditTableSnapshot, type SerializedAuditError } from "./ui-a11y-artifacts.js";
+import { assessTable, atomicWriteJson, atomicWriteText, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, sanitizeAuditArtifact, serializeAuditError, storeAuditRecord, writeAuditSummary, type AuditRecord, type AuditTableSnapshot, type SerializedAuditError } from "./ui-a11y-artifacts.js";
 import { createDefaultAnalyzerRegistry, type AnalyzerRegistry } from "@duo-director/analyzer";
 import { createDecisionService } from "@duo-director/core";
 import { recordReview, reviewChanges } from "@duo-director/director";
@@ -122,8 +122,16 @@ const proposalIds: string[] = [];
 let runSummary: Record<string, unknown> = {};
 
 function record(result: CaseResult): void {
-  storeAuditRecord(outputDir, result as CaseResult & AuditRecord, recordedIds);
+  storeAuditRecord(outputDir, sanitizeAuditArtifact(result) as CaseResult & AuditRecord, recordedIds);
   recordedResults.push(result);
+}
+
+function saveLocalDiagnostics(): void {
+  if (process.env.DUO_A11Y_LOCAL_DIAGNOSTICS !== "1") return;
+  const directory = path.join(runsDir, "local-diagnostics", runId);
+  fs.mkdirSync(directory, { recursive: true });
+  atomicWriteJson(path.join(directory, "summary.json"), runSummary);
+  for (const result of recordedResults) atomicWriteJson(path.join(directory, `${result.id.replaceAll(/[^\w.-]/gu, "_")}.json`), result);
 }
 
 function tempRepo(): { root: string; index: () => Promise<void> } {
@@ -379,15 +387,16 @@ beforeAll(async () => {
   fs.mkdirSync(outputDir, { recursive: true });
   const gitValue = (args: string[]) => { try { return git(args); } catch (error) { return `unavailable: ${String(error)}`; } };
   runSummary = {
-    runId, startedAt: new Date().toISOString(), cwd: ROOT,
-    gitCommit: gitValue(["rev-parse", "HEAD"]), gitStatus: gitValue(["status", "--short"]),
+    runId, startedAt: new Date().toISOString(),
+    gitCommit: gitValue(["rev-parse", "HEAD"]),
     node: process.version, pnpm: /(?:^| )pnpm\/([^ ]+)/u.exec(process.env.npm_config_user_agent ?? "")?.[1] ?? "11.25.0 (packageManager pin)",
     playwright: (JSON.parse(fs.readFileSync(require.resolve("playwright-core/package.json"), "utf8")) as { version: string }).version,
     axeCore: axeVersion.version, browser: { name: browserName, version: browserVersion }, fixture: { status: "preparing" },
-    schemaVersion: 2, configuredTags: TAGS, additionalTableRules: ["td-has-header (explicitly enabled)", "td-headers-attr", "th-has-data-cells", "scope-attr-valid", "empty-table-header"],
+    schemaVersion: 3, configuredTags: TAGS, additionalTableRules: ["td-has-header (explicitly enabled)", "td-headers-attr", "th-has-data-cells", "scope-attr-valid", "empty-table-header"],
     outcomes: { passed: 0, productIssues: 0, toolErrors: 0, unverified: 0 }, setupComplete: false,
   };
-  writeAuditSummary(summaryPath, runSummary);
+  writeAuditSummary(summaryPath, sanitizeAuditArtifact(runSummary));
+  saveLocalDiagnostics();
   try {
     verifyAxeTags();
     const created = await createDefaultAnalyzerRegistry();
@@ -420,11 +429,11 @@ beforeAll(async () => {
     const task = workMap.touchWorkTask(fixtureRoot, "Audit", "Keyboard graph selection", new Date(), { duoSessionId: "a11y-session", targetRef: "issue:AUTH-7" });
     if (task === undefined) throw new Error("Could not create Work map fixture task");
     runSummary = { ...runSummary, fixture: { status: "ready", source: "fixtures/review/app", generatedFiles: ["index DB", "two pending proposals", "one recorded review", "one work task"] }, setupComplete: true };
-    writeAuditSummary(summaryPath, runSummary);
+    writeAuditSummary(summaryPath, sanitizeAuditArtifact(runSummary));
   } catch (error) {
     record({ schemaVersion: 2, id: "audit-setup", screen: "감사 준비", state: "fixture/browser setup", status: "도구 오류", error: serializeAuditError(error) });
     runSummary = { ...runSummary, setupComplete: false, setupError: serializeAuditError(error) };
-    writeAuditSummary(summaryPath, runSummary);
+    writeAuditSummary(summaryPath, sanitizeAuditArtifact(runSummary));
     throw error;
   }
 }, 300_000);
@@ -454,12 +463,13 @@ afterAll(async () => {
   const casesWithUnverifiedFindings = results.filter(hasUnverifiedFindings).length;
   const executionComplete = runSummary.setupComplete === true && outcomes.toolErrors === 0 && finalCleanupErrors.length === 0 && missingCases.length === 0 && duplicateCases.length === 0;
   const accessibilityVerificationComplete = executionComplete && casesWithUnverifiedFindings === 0;
-  runSummary = { ...runSummary, schemaVersion: 2, finishedAt: new Date().toISOString(), outcomes, casesWithProductFindings, casesWithToolErrors,
+  runSummary = { ...runSummary, schemaVersion: 3, finishedAt: new Date().toISOString(), outcomes, casesWithProductFindings, casesWithToolErrors,
     casesWithUnverifiedFindings,
     globalCleanupErrors: finalCleanupErrors,
     caseCount: results.length, missingCases, duplicateCases, executionComplete, accessibilityVerificationComplete };
-  atomicWriteText(casesPath, `${results.map((result) => JSON.stringify(result)).join("\n")}\n`);
-  writeAuditSummary(summaryPath, runSummary);
+  for (const result of results) atomicWriteJson(path.join(outputDir, result.id.replaceAll(/[^\w.-]/gu, "_"), "result.json"), sanitizeAuditArtifact(result));
+  atomicWriteText(casesPath, `${results.map((result) => JSON.stringify(sanitizeAuditArtifact(result))).join("\n")}\n`);
+  writeAuditSummary(summaryPath, sanitizeAuditArtifact(runSummary));
   expect(executionComplete, `Audit execution incomplete: ${JSON.stringify({ missingCases, duplicateCases, outcomes, finalCleanupErrors })}`).toBe(true);
 });
 
@@ -858,7 +868,12 @@ describe("DUO UI accessibility audit 297", () => {
         await page.keyboard.press("Tab");
       }
       if (focusedNode !== undefined) await page.keyboard.press("Enter");
-      await page.waitForTimeout(100);
+      if (focusedNode !== undefined) {
+        try { await page.waitForFunction(({ id, title }) => {
+          const selectedNode = [...document.querySelectorAll<HTMLElement>(".react-flow__node")].find((node) => node.dataset.id === id);
+          return selectedNode?.classList.contains("selected") === true && document.querySelector(".work-detail h2")?.textContent?.trim() === title;
+        }, { id: focusedNode.id, title: focusedNode.title }, { timeout: 5_000 }); } catch { /* Record the observed state below as a product finding. */ }
+      }
       const after = await page.locator(".work-detail h2").textContent();
       const selected = focusedNode === undefined ? false : await page.locator(".react-flow__node").evaluateAll((elements, id) =>
         elements.some((element) => element.getAttribute("data-id") === id && element.classList.contains("selected")), focusedNode.id);

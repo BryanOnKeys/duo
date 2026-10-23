@@ -112,6 +112,26 @@ export function serializeAuditError(error: unknown): SerializedAuditError {
   return typeof error === "object" && error !== null ? visit(error, 0) as SerializedAuditError : { name: "Error", message: String(error) };
 }
 
+/** Remove machine-specific and free-form diagnostic data before evidence is shared. */
+export function sanitizeAuditArtifact(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeAuditArtifact);
+  if (value === null || typeof value !== "object") return value;
+  const record = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    if (key === "schemaVersion") { result.schemaVersion = 3; continue; }
+    if (["cwd", "gitStatus", "stack", "cause", "errors"].includes(key)) continue;
+    if (key === "message" && ("name" in record || "phase" in record)) continue;
+    if (key === "error" && child !== null && typeof child === "object") {
+      const error = child as Record<string, unknown>;
+      result.error = { name: typeof error.name === "string" ? error.name : "Error", message: "[redacted]" };
+      continue;
+    }
+    result[key] = sanitizeAuditArtifact(child);
+  }
+  return result;
+}
+
 export async function runAuditLifecycle<T>(options: {
   readonly run: (attemptIndex: number) => Promise<T>;
   readonly cleanup: (attemptIndex: number) => Promise<readonly AuditCleanupError[]>;
