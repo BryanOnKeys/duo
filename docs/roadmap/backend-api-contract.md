@@ -30,6 +30,8 @@
 | GET | `/api/direction` | 없음 | Requirement·Decision·Constraint·Milestone·proposal 목록(권한 상태 포함) | 같음 | 세션 | 없음 | 예 | 없음 |
 | GET | `/api/proposals` | 없음 | `{ proposals[], previews: { [P-id]: ConfirmPreview \| {error[]} } }`(pending만 preview) | 같음 | 세션 | 없음 | 예 | 없음 |
 | GET | `/api/proposals/{P-id}/preview` → `duo.ui.preview/1`(API-05, **IMPLEMENTED(next)**, #54 `81b1b95`) | 없음 | `{ status: "ready", preview: ConfirmPreview, warnings[] }`, 초기화 전이면 `{ status: "not-initialized", message }`, 그 밖에는 `{ status: "failed", diagnostics[] }`. `preview`는 `/api/proposals`의 `previews` 항목과 같고 `preview.digest`를 confirm의 `previewDigest`로 보낸다. 진단 메시지의 이 컴퓨터 절대 경로는 `<repository>`로 바꾼다 | proposal ID 형식(`P-…`)이 아니면 400 `UI_REQUEST_INVALID`. 도메인: `PROPOSAL_NOT_FOUND`, `PROPOSAL_NOT_PENDING`, Truth 권한 오류(`requireCompleteTruth`) | 세션 | 없음(lock·쓰기·repair 없음) | 예 | 없음. preview 뒤 proposal·대체 대상·Truth가 바뀌면 digest가 달라져 confirm이 `DECISION_CONFIRM_PREVIEW_CHANGED`로 거부됨 |
+| GET | `/api/decisions` → `duo.ui.decisions/1`(API-02, **IMPLEMENTED(next)**, #53 `a0d4c92`) | `state?`(proposed·confirmed·superseded·rejected), `q?`(ID·제목의 대소문자 무시 부분 일치, 1~200자). 그 밖의 query 이름은 400 | `{ decisions: DecisionSummary[], actorLabelsAuthenticated: false, truth: { complete, problems[] } }`. 항목은 ID 순: `id, title, state, authority`(CONFIRMED·SUPERSEDED·REJECTED·PROPOSED), `locked, lockStatus`(valid·missing·mismatch·not-confirmed), `origin`(lifecycle·manual·null), `supersedes, supersededBy`, 파일에 있을 때만 `proposalId, confirmedAt, confirmedBy`(label, 인증 아님), `integrity`(ok·invalid)와 `problems[]`, `location`. 초기화 전이면 `{ status: "not-initialized", message }` | 400 `UI_REQUEST_INVALID`. 손상된 Truth는 200 + `truth.complete: false`와 `problems`(`path`·`line`은 저장소 상대 경로) | 세션 | 없음(lock·쓰기 없음) | 예 | 없음 |
+| GET | `/api/decisions/{id}` → `duo.ui.decision-detail/1`(API-03, **IMPLEMENTED(next)**, #53 `a0d4c92`) | 없음. 경로 ID는 `[A-Za-z][A-Za-z0-9._-]{0,127}`(D-###만이 아니라 Markdown의 ADR-### 등도 됨) | `{ status: "found", id, decision, actorLabelsAuthenticated: false, truth }`. `decision`은 목록 항목 + `question, answer, rationale, governs, forbids`, 파일에 있을 때 `proposedAt, proposedBy, proposedByKind`, `lock: { id, status, expected, recorded? }`, `chain`(오래된 것부터, 없는 ID는 `{ id, missing: true }`, 순환은 `{ id, loop: true }`, 방향마다 최대 64 link), `truncated: { older, newer }`. 없는 ID는 `{ status: "not-found", id, truth }` | 형식이 아니거나 인코딩이 깨진 ID, 128자 초과는 400 `UI_REQUEST_INVALID`. 404를 쓰지 않음 | 세션 | 없음 | 예 | 없음 |
 | POST | `/api/proposals/{P-id}/confirm` | `{ confirmId, previewDigest }`(둘 다 필수) | `{ status: "confirmed", result: { decisionId, path, from, supersedes?, stale?, indexRequired: true, repaired[] }, warnings[] }` 또는 `{ status: "failed", diagnostics[] }` | 400 `UI_CONFIRM_ID_MISMATCH`, `UI_REQUEST_INVALID`. 도메인: `DECISION_CONFIRM_PREVIEW_CHANGED`, `PROPOSAL_NOT_PENDING`, `DECISION_LOCK_BUSY` 등 | 세션 + CSRF. actor `ui:<user.name>`(human 고정) | `D-###.yaml` 생성, 대체 대상 표시, proposal 삭제, metrics 한 줄 | 아니오. 두 번째 호출은 `PROPOSAL_NOT_PENDING(... confirmed as D-###)` | decisions.lock(5000 ms). 본 digest와 다르면 아무것도 쓰지 않음 |
 | POST | `/api/proposals/{P-id}/reject` | `{ reason? }`(최대 2000자) | `{ status: "rejected", result }` 또는 failed | `PROPOSAL_NOT_PENDING`, `DECISION_LOCK_BUSY` | 위와 같음 | proposal 파일에 rejected 기록 | 아니오. 두 번째는 `PROPOSAL_NOT_PENDING` | 같은 lock |
 | GET | `/api/reviews`, `/api/reviews/{review-id}` | 없음 | 기록된 Review 목록·한 건 | 같음 | 세션 | 없음 | 예 | 없음 |
@@ -40,7 +42,14 @@
 | POST | `/api/context` | `{ task, budget? }` | Context 결과 | 도메인 실패(`index-required` 등) | 세션 + CSRF | metrics 한 줄 | 예(결과 동일) | 읽기 |
 | POST | `/api/review` | `{ task?, from?, to?, includeSemanticAssist? }` | Review 결과 | 같음 | 세션 + CSRF | metrics 한 줄 | 예 | 읽기 |
 
-없는 것: Decision 목록·상세 전용 엔드포인트(`direction`·`entity`가 대신함. API-02·03은 PR #53에서 리뷰 중), 감사 이력, 현재 사용자·권한, proposal 생성·취소, D-### 제자리 confirm(CLI에만 있음). 단건 preview는 `next`에만 있다(API-05).
+없는 것: 감사 이력, 현재 사용자·권한, proposal 생성·취소, D-### 제자리 confirm(CLI에만 있음). Decision 목록·상세(API-02·03, #53)와 단건 preview(API-05, #54)는 `next`에만 있고 공개 0.3.3에는 없다.
+
+Decision 읽기 API의 규칙(API-02·03, `packages/integration/src/http/decisions.ts`, [08-ui-spec](../08-ui-spec.md)):
+
+- **진단 귀속.** Decision별 `problems`에는 그 Decision의 error 진단만 들어간다. 메시지가 그 ID로 시작하는 진단(`D-001: …`), 또는 위치가 그 Decision의 원본 범위 안에 있는 진단이다. 같은 파일(예: Markdown)에 정의가 여럿이면, 진단 줄을 포함하는 가장 좁은 정의(Requirement·Decision·Constraint·Issue·Milestone 중)에 붙인다. 줄 정보가 없는 진단은 파일에 정의가 하나일 때만 붙인다. 같은 넓이의 범위가 겹쳐 정할 수 없으면 어느 Decision에도 붙이지 않는다. 붙지 않은 진단도 `truth.problems`에는 남는다.
+- **대체 사슬 한도.** `chain`은 방향마다 64 link까지만 준다(`missing`·`loop` 표시도 1 link로 센다). `truncated.older`·`truncated.newer`는 그 방향에서 한도에 도달했는데, 마지막으로 반환된 Decision이 다음 link를 더 선언했을 때만 `true`다. 정확히 한도에서 끝나면 `false`다. 생략된 부분은 그 방향 끝 ID의 상세를 다시 요청해 이어 읽는다.
+- **인증 아님.** `confirmedBy`·`proposedBy`는 파일에 적힌 label이다. `lockStatus: valid`는 confirm 절차를 거쳤다는 근거일 뿐 신원 증명이 아니다(ADR-013). 역할 검사는 없다(ADR-015 미승인).
+- **요청 경계.** `/api/proposals/{id}/preview`와 같다. 세션과 허용 Host가 필요하고, Origin·CSRF는 GET에 요구하지 않으며, CORS 헤더를 주지 않는다. 이 경계를 고정하는 회귀 테스트는 PR #76(BE-API-10, 리뷰 중)에 있다.
 
 ## 3. Confirm 계약에서 반드시 지킬 것
 
@@ -54,8 +63,8 @@
 | ID | Method·Path | Request | Response(data) | 오류 | 권한 | Side effect | 멱등성·동시성 | 의존 |
 |---|---|---|---|---|---|---|---|---|
 | API-01 | GET `/api/me` → `duo.ui.me/1` | 없음 | `{ mode: "local"\|"team", actor: { kind: "human", label, source: "git-user-name", authenticated: false }, git: { name, email? }, roles[], capabilities: { confirm, reject, withdraw }, agentEnvironment: { detected, markers[] }, trust: TrustStatus }`. 각 capability는 `{ allowed, reason?, enforcement: "local-ux" \| "merge-review" }`. `trust`는 §7의 `TrustStatus`(T94) | 세션 오류 | 세션 | 없음 | 예. `trust`는 호출 때마다 다시 확인하고, 못 하면 `UNVERIFIED` | Local 부분은 BE-GOV-06, Team 부분과 `trust`는 H-88 |
-| API-02 | GET `/api/decisions` → `duo.ui.decisions/1` | `state?`, `q?` | `{ decisions: [{ id, title, state, authority: "CONFIRMED"\|"SUPERSEDED"\|..., locked, lockStatus, supersedes, supersededBy, proposalId?, confirmedAt?, confirmedBy?, origin: "lifecycle"\|"manual" }] }` | 도메인 실패 | 세션 | 없음 | 예 | 없음(현재 데이터로 가능) |
-| API-03 | GET `/api/decisions/{D-id}` | 없음 | API-02 항목 + `lock: LockVerification`, `chain: [{id, state}]`(대체 사슬), `location` | 404 대신 `data.status: "not-found"` | 세션 | 없음 | 예 | 없음 |
+| API-02 | GET `/api/decisions` | — | **IMPLEMENTED(next)**, §2로 옮김. 설계안보다 `integrity`·`problems`(Decision별), `truth`, `actorLabelsAuthenticated`가 더 있고, `origin`은 미확정이면 null이다 | — | — | — | — | #53 `a0d4c92` |
+| API-03 | GET `/api/decisions/{id}` | — | **IMPLEMENTED(next)**, §2로 옮김. 응답은 `{ status, id, decision, … }`로 감싼다. `chain` 항목에는 `authority`와 `missing`·`loop` 표시가 있고, `truncated: { older, newer }`가 더 있다. 경로 ID는 D-###에 한정하지 않는다 | — | — | — | — | #53 `a0d4c92` |
 | API-04 | GET `/api/decisions/{D-id}/history` → `duo.ui.decision-history/1` | 없음 | `DecisionHistoryData`(§7): 이벤트와 파일에서 추론한 항목(`derived: true`), 체인 상태, Team Mode 시작 시점. 표시 규칙은 §9 | 같음 | 세션 | 없음 | 예 | BE-AUD-01·05(H-88) |
 | API-05 | GET `/api/proposals/{P-id}/preview` | — | **IMPLEMENTED(next)**, §2로 옮김. 응답은 `ConfirmPreview`를 그대로 주지 않고 `{ status, preview, warnings }`로 감싼다 | — | — | — | — | #54 `81b1b95` |
 | API-06 | POST `/api/proposals/{P-id}/confirm`에 `reason?` 추가 | `{ confirmId, previewDigest, reason? }`(최대 2000자) | 지금과 같음 + `eventId?` | 지금과 같음 + Team Mode `DECISION_ROLE_FORBIDDEN`, `DECISION_AGENT_ENVIRONMENT` | 세션 + CSRF + (Team) 승인자 | 이벤트 1건 추가 | digest 바인딩 유지. 같은 요청 재시도는 `PROPOSAL_NOT_PENDING`이고 이벤트를 더 만들지 않음 | BE-AUD-02, H-88 |
@@ -222,7 +231,7 @@ Local Mode에서는 지금처럼 세션을 가진 같은 컴퓨터의 사용자�
 
 | 범위 | Mock 가능 | 근거 |
 |---|---|---|
-| Decision 목록·상세(API-02·03) | O | 지금 데이터로 계산 가능, HD 불필요 |
+| Decision 목록·상세(API-02·03) | O, `next` 빌드의 실제 서버로도 확인 가능 | §2의 응답. `truncated`, Decision별 `integrity`·`problems`, `truth.complete`를 화면에 반영 |
 | 단건 preview(API-05) | O, `next` 빌드의 실제 서버로도 확인 가능 | `{ status: "ready", preview: ConfirmPreview, warnings }` wrapper |
 | 오류 표현(§10의 IMPLEMENTED 코드) | O, 실제 서버로도 확인 가능 | 지금 서버가 냄 |
 | `/api/me`와 신뢰 상태 배지(API-01) | O(mock만) | 필드 이름은 H-88 뒤 확정 |

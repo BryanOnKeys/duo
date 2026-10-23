@@ -53,13 +53,13 @@
 | BE-AUD-07 | 이벤트 누락 감지(doctor, Team Mode) | EP-04 | Task | Decision | BE-1 | 2 | P2 | MEDIUM | MEDIUM | AUD-02, GOV-07 | 신규 | 미구현 |
 | BE-AUD-08 | 재시도·repair 재실행의 중복 이벤트 방지 | EP-04 | Task | Decision | BE-1 | 2 | P2 | MEDIUM | MEDIUM | AUD-02 | 신규 | 미구현 |
 | BE-AUD-09 | 이벤트의 개인정보·보존 정책(표시 이름, Git email, 사유) | EP-04 | Task | Documentation, Governance / Security | BE-1 | 1 | P2 | MEDIUM | HIGH | HD | 신규 | 미구현 |
-| BE-API-02 | `GET /api/decisions`, `GET /api/decisions/{id}`(API-02·03) | EP-14 | Story | API / Backend | BE-1 | 3 | P2 | LOW | HIGH | 없음 | S15P31A106-331 | PR #53 리뷰 중(HD 불필요) |
+| BE-API-02 | `GET /api/decisions`, `GET /api/decisions/{id}`(API-02·03) | EP-14 | Story | API / Backend | BE-1 | 3 | P2 | LOW | HIGH | 없음 | S15P31A106-331 | `next`에 구현(#53 `a0d4c92`, 미공개) |
 | BE-API-04 | `GET /api/decisions/{id}/history` | EP-14 | Sub-task | API / Backend | BE-1 | 2 | P2 | LOW | MEDIUM | AUD-05 | S15P31A106-314 | 미구현 |
 | BE-API-05 | `GET /api/proposals/{id}/preview` | EP-14 | Task | API / Backend | BE-1 | 1 | P3 | LOW | HIGH | 없음 | S15P31A106-332 | `next`에 구현(#54 `81b1b95`, 미공개) |
 | BE-API-06 | confirm 요청의 선택 `reason` | EP-14 | Task | API / Backend, CLI | BE-1 | 1 | P2 | LOW | HIGH | AUD-02 | 신규 | 미구현 |
 | BE-API-07 | proposal withdraw(스키마 확장 포함) | EP-03 | Story | Decision, API / Backend | BE-1 | 3 | P3 | MEDIUM | MEDIUM | HD | 신규 | 미구현 |
 | BE-API-09 | 새 진단 코드의 공통 오류 계약 테스트 | EP-16 | Task | API / Backend, QA / Testing | BE-1 | 2 | P2 | LOW | HIGH | GOV-05 | 신규 | 미구현 |
-| BE-API-10 | 새 엔드포인트의 세션·CSRF·Origin 회귀 테스트 | EP-16 | Task | QA / Testing | BE-1 | 2 | P2 | MEDIUM | HIGH | API-02 | 신규 | 미구현 |
+| BE-API-10 | 새 엔드포인트의 세션·CSRF·Origin 회귀 테스트 | EP-16 | Task | QA / Testing | BE-1 | 2 | P2 | MEDIUM | HIGH | API-02 | S15P31A106-333 | 진행 중: Preview·Confirm은 `next`(#64 `6c6c872`), Decision 목록·상세는 PR #76 리뷰 중 |
 | BE-DATA-02 | repair 결과를 이벤트와 모든 표면 출력에 노출 | EP-03 | Task | Decision, MCP | BE-1(MCP 출력은 AI-2와 협의) | 2 | P2 | MEDIUM | MEDIUM | AUD-02 | 신규 | 미구현 |
 | BE-DATA-03 | #34 결과의 동시성 버그 수정 | EP-15 | Bug(예약) | Data / Storage | BE-1 | 미정 | P1 | HIGH | LOW | #34 결과 | S15P31A106-274·275 결과에 따라 생성 | 조사 중 |
 | BE-DATA-04 | 0.3.3 저장소가 새 선택 파일·이벤트 영역과 함께 그대로 읽히는지 호환 테스트 | EP-16 | Task | Data / Storage, QA / Testing | BE-1 | 2 | P1 | MEDIUM | HIGH | AUD-01, GOV-03 | 신규 | 미구현 |
@@ -102,7 +102,7 @@ CI 안정성(#37)은 기존 S15P31A106-233(AI-4)이 맡고 있어 새로 만들�
 | BE-AUD-07 | Team Mode에서 이벤트 없는 확정 Decision을 doctor가 action으로 표시 | doctor 테스트 |
 | BE-AUD-08 | 같은 요청 재시도와 repair 재실행이 이벤트를 늘리지 않음 | 재시도 테스트 |
 | BE-AUD-09 | 저장하는 개인정보와 보존 기간, 삭제 방법을 문서화 | 문서 리뷰 |
-| BE-API-02 | Decision 목록·상세가 권한 상태, lock 상태, 대체 사슬, `origin: lifecycle\|manual`을 반환 | `decisions-api.test.ts`(PR #53) |
+| BE-API-02 | Decision 목록·상세가 권한 상태, lock 상태, 대체 사슬, `origin: lifecycle\|manual`을 반환 | `decisions-api.test.ts`(`next`, 충족) |
 | BE-API-04 | 이력 엔드포인트가 BE-AUD-05 결과를 반환 | `server.test.ts` |
 | BE-API-05 | 단건 preview가 `/api/proposals`의 preview와 같은 digest | `preview-api.test.ts`(`next`, 충족) |
 | BE-API-06 | `reason`이 이벤트에 저장, 없으면 생략, 길이 제한 2000 | `server.test.ts`, CLI |
