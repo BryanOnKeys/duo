@@ -86,8 +86,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   for (const s of servers) await s.close();
+  await Promise.all(servers.map((s) => s.closed));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   registry?.dispose();
-  temps.forEach((t) => fs.rmSync(t, { recursive: true, force: true }));
+  await Promise.all(temps.map((t) => fs.promises.rm(t, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 })));
 });
 
 describe("DUO UI in a browser (T18.1)", () => {
@@ -109,6 +111,101 @@ describe("DUO UI in a browser (T18.1)", () => {
     expect(count).toBeGreaterThan(1);
     expect(await page.getByText("Loading…").count()).toBe(0);
     expect(errors).toEqual([]);
+  });
+
+  it("keeps Work map keyboard selection, detail and refresh state synchronized", async (ctx) => {
+    if (browser === undefined) return ctx.skip();
+    const r = repo("review/app");
+    const first = touchWorkTask(r.root, "Codex", "Keyboard task Alpha", new Date("2026-10-22T00:00:00.000Z"), { duoSessionId: "keyboard-alpha" });
+    const second = touchWorkTask(r.root, "Codex", "Keyboard task Beta", new Date("2026-10-22T00:00:01.000Z"), { duoSessionId: "keyboard-beta" });
+    if (first === undefined || second === undefined) throw new Error("Could not create Work map keyboard fixtures");
+    const { page, server, errors } = await open(r.root);
+    await page.goto(`${server.origin}/work`);
+    const nodes = page.locator(".react-flow__node");
+    await nodes.first().waitFor();
+    const taskA = nodes.filter({ hasText: "Keyboard task Alpha" });
+    const taskB = nodes.filter({ hasText: "Keyboard task Beta" });
+    const worktree = nodes.filter({ hasText: "Worktree ·" }).first();
+    const taskAId = await taskA.getAttribute("data-id");
+    const taskBId = await taskB.getAttribute("data-id");
+    const worktreeId = await worktree.getAttribute("data-id");
+    expect(taskAId).toBeTruthy();
+    expect(taskBId).toBeTruthy();
+    expect(worktreeId).toBeTruthy();
+    const detail = page.locator(".work-detail h2");
+    const taskATitle = "[Codex] Keyboard task Alpha";
+    const taskBTitle = "[Codex] Keyboard task Beta";
+    const worktreeTitle = await worktree.locator(".work-node-title").textContent();
+    const expectDetail = async (title: string) => {
+      try {
+        await page.waitForFunction((expected) => document.querySelector(".work-detail h2")?.textContent?.trim() === expected,
+          title, { timeout: 2_000 });
+      } catch {
+        const detailCount = await detail.count();
+        const panel = page.locator(".work-detail");
+        throw new Error(`Work map detail did not update: ${JSON.stringify({ expected: title, actual: detailCount === 0 ? null : await detail.textContent(), panelCount: await panel.count(), body: (await page.locator("body").textContent())?.slice(-500), selected: await page.locator(".react-flow__node.selected").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-id"))), errors })}`);
+      }
+    };
+    const isSelected = async (locator: typeof taskA) => locator.evaluate((node) => node.classList.contains("selected"));
+    await expectDetail(taskBTitle);
+
+    await page.getByLabel("Agent").focus();
+    let reachedWorktree = false;
+    for (let index = 0; index < 24; index++) {
+      reachedWorktree = await worktree.evaluate((node) => node === document.activeElement);
+      if (reachedWorktree) break;
+      await page.keyboard.press("Tab");
+    }
+    expect(reachedWorktree).toBe(true);
+    await expectDetail(taskBTitle);
+    await page.keyboard.press("Enter");
+    await expectDetail(worktreeTitle ?? "");
+    await page.waitForFunction((id) => [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
+      .some((node) => node.dataset.id === id && node.classList.contains("selected")), worktreeId);
+
+    await taskA.evaluate((node) => (node as HTMLElement).focus());
+    await page.keyboard.press("Space");
+    await expectDetail(taskATitle);
+    await taskB.click();
+    await expectDetail(taskBTitle);
+    await worktree.click();
+    await expectDetail(worktreeTitle ?? "");
+    await page.locator(".work-connection").filter({ hasText: "Keyboard task Alpha" }).click();
+    await expectDetail(taskATitle);
+
+    await taskA.click();
+    await worktree.click({ modifiers: ["Shift"] });
+    await page.waitForFunction((id) => [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
+      .some((node) => node.dataset.id === id && node.classList.contains("selected")), worktreeId);
+    const selectedIdsAfterMulti = await page.locator(".react-flow__node.selected").evaluateAll((elements) => elements.map((element) => element.getAttribute("data-id")));
+    expect(selectedIdsAfterMulti).toEqual(expect.arrayContaining([taskAId, worktreeId]));
+    expect(await isSelected(taskA)).toBe(true);
+    expect(await isSelected(worktree)).toBe(true);
+    await expectDetail(worktreeTitle ?? "");
+    await worktree.click({ modifiers: ["Shift"] });
+    await page.waitForFunction((id) => [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
+      .some((node) => node.dataset.id === id && node.classList.contains("selected")), taskAId);
+    expect(await isSelected(worktree)).toBe(false);
+    await expectDetail(taskATitle);
+
+    await page.locator(".work-canvas").click({ position: { x: 8, y: 8 } });
+    await page.getByText("Select a node to inspect its source and links.").waitFor();
+    await taskA.click();
+    await expectDetail(taskATitle);
+    recordWorkReview(r.root, "keyboard-alpha", first.id, { digest: "keyboard-refresh", verdict: "PASS", claimCount: 2 }, new Date("2026-10-22T00:00:02.000Z"));
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expectDetail(taskATitle);
+    await page.getByText("Review PASS · 2 claims · keyboard-refresh").waitFor();
+    expect(await isSelected(taskA)).toBe(true);
+
+    completeWorkTask(r.root, first.id, new Date("2026-10-22T00:00:03.000Z"));
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await page.waitForFunction((id) => ![...document.querySelectorAll<HTMLElement>(".react-flow__node")]
+      .some((node) => node.dataset.id === id), taskAId);
+    await page.getByText("Select a node to inspect its source and links.").waitFor();
+    expect(await page.locator(".react-flow__node").filter({ hasText: "Keyboard task Beta" }).count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.close();
   });
 
   it("shows live agent work, review, file changes and completion without refreshing", async (ctx) => {
