@@ -1,6 +1,7 @@
 // Regression tests for Issue #66: timed-out agent sessions stop their whole process tree, the timeout is an explicit
 // flag, and arguments with spaces and quotes reach the agent unchanged. Only harmless local Node processes are started
 // (no Codex). On Windows the agent is launched through a copy of npm's codex.cmd shim, as in a real run.
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,7 +37,20 @@ let env = {};
 let counter = 0;
 const tracked = new Set();
 
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; } };
+// Running, not merely present: on POSIX an ended process whose parent also ended stays a zombie (state Z) until init
+// reaps it, and kill(pid, 0) still succeeds for it. A zombie has exited and holds no stdio, so it counts as ended.
+function alive(pid) {
+  try { process.kill(pid, 0); } catch (error) { if (error.code !== "EPERM") return false; }
+  if (IS_WIN) return true;
+  let state;
+  try { state = fs.readFileSync("/proc/" + pid + "/stat", "utf8").replace(/^.*\)\s+/su, "").charAt(0); }
+  catch {
+    const ps = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" });
+    if (ps.error !== undefined) return true; // cannot tell: treat as running, never as ended
+    state = ps.stdout.trim().charAt(0);
+  }
+  return state !== "" && state !== "Z";
+}
 async function waitFor(read, ms = 15_000) {
   const end = Date.now() + ms;
   for (;;) {
