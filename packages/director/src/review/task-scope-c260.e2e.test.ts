@@ -4,26 +4,26 @@
  *
  * Pinned reproduction fixtures (F1, F1c, F2, N1–N3):
  * - F1: Task "Fix HTTPError message formatting", diff touches `isHTTPError` in the same file
- *       (`source/errors/HTTPError.ts`). Current 0.3.3 behavior: `outside-task-context`, WARN.
+ *       (`source/errors/HTTPError.ts`). Current `next` behavior: `outside-task-context`, WARN.
  *       (Evaluated at `max_depth: 1` for a sibling export, and also reproduced at the default
  *       `max_depth: 2` when the diff touches top-level lines outside `HTTPError` so `diffSeeds`
  *       produces `file:source/errors/HTTPError.ts` after `dedupeContainers` dropped the file node.)
  * - F1c: Same task, diff touches the `HTTPError` class body (`source/errors/HTTPError.ts`).
- *        Current 0.3.3 behavior: `in-task-context`, PASS.
+ *        Current `next` behavior: `in-task-context`, PASS.
  * - F2: Task "Update HTTPError.ts to add a status code", diff touches the `HTTPError` class body.
- *       Current 0.3.3 behavior (H-79): basename with extension without a path separator does not
+ *       Current `next` behavior (H-79): basename with extension without a path separator does not
  *       resolve to a non-root file seed (`source/errors/HTTPError.ts` is not an exact path seed).
  *       Asserts the seed resolution and claim reason only, not the BM25-dependent verdict.
  * - N1: Same task as F1, diff touches unrelated `src/billing/invoice.ts`.
- *       Current 0.3.3 behavior: `outside-task-context`, WARN (must stay WARN under Fix B).
+ *       Current `next` behavior: `outside-task-context`, WARN (must stay WARN under Fix B).
  * - N2: Same task as F1, diff touches an unrelated function in `src/client.ts`, which only imports
- *       `HTTPError`. Current 0.3.3 behavior: `outside-task-context` (must stay under Fix B; file
+ *       `HTTPError`. Current `next` behavior: `outside-task-context` (must stay under Fix B; file
  *       ownership must not spread through imports).
- * - N3: No task provided. Current 0.3.3 behavior: no `scope-relevance` claims (`no-task-scope`
+ * - N3: No task provided. Current `next` behavior: no `scope-relevance` claims (`no-task-scope`
  *       limitation).
  *
  * Maintenance rule for pinned tests:
- * - Passing tests in this file pin current 0.3.3 behavior (`next` = `v0.3.3` product code) without
+ * - Passing tests in this file pin current `next` behavior without
  *   altering PASS/WARN/BLOCK/ASK semantics or exit codes.
  * - A future fix PR (after a recorded Maintainer Decision such as draft H-91 for Fix B or a revision
  *   of H-79 for Fix A) must update the corresponding pinned assertion to the new expected value and
@@ -158,7 +158,7 @@ describe("Issue #58 ([C260]): task-scope relevance pinned fixtures (F1, F1c, F2,
     repo.git("clean", "-fdq");
   }
 
-  it("F1: pins current 0.3.3 behavior (outside-task-context, WARN when task names HTTPError and diff edits sibling export isHTTPError or file-level lines in the same file)", async () => {
+  it("F1: pins current next behavior (outside-task-context, WARN when task names HTTPError and diff edits sibling export isHTTPError or file-level lines in the same file)", async () => {
     reset();
     repo.edit(
       "source/errors/HTTPError.ts",
@@ -205,32 +205,35 @@ describe("Issue #58 ([C260]): task-scope relevance pinned fixtures (F1, F1c, F2,
     reset();
     repo.write(".duo-project/project.yaml", PROJECT_YAML_DEFAULT_DEPTH);
     repo.git("commit", "-qam", "use default max_depth: 2");
-    repo.write(
-      "source/errors/HTTPError.ts",
-      `// Format HTTP error message\n${FILES["source/errors/HTTPError.ts"] ?? ""}`,
-    );
-    const resDefaultDepth = await runReview(repo, { task: TASK_F1, diff: W });
-    expect(resDefaultDepth.seeds.map((s) => `${s.ref} ${s.reason}`)).toEqual([
-      "source/errors/HTTPError.ts file-changed",
-    ]);
-    expect(scopeClaims(resDefaultDepth)).toEqual([
-      expect.objectContaining({
-        rule: "scope-relevance",
-        subject: { kind: "file", id: "source/errors/HTTPError.ts" },
-        alignment: "UNKNOWN",
-        reason: "outside-task-context",
-        drift: true,
-      }),
-    ]);
-    expect(resDefaultDepth.verdict).toBe("WARN");
-    repo.git("reset", "-q", "--hard", "HEAD~1");
+    try {
+      repo.write(
+        "source/errors/HTTPError.ts",
+        `// Format HTTP error message\n${FILES["source/errors/HTTPError.ts"] ?? ""}`,
+      );
+      const resDefaultDepth = await runReview(repo, { task: TASK_F1, diff: W });
+      expect(resDefaultDepth.seeds.map((s) => `${s.ref} ${s.reason}`)).toEqual([
+        "source/errors/HTTPError.ts file-changed",
+      ]);
+      expect(scopeClaims(resDefaultDepth)).toEqual([
+        expect.objectContaining({
+          rule: "scope-relevance",
+          subject: { kind: "file", id: "source/errors/HTTPError.ts" },
+          alignment: "UNKNOWN",
+          reason: "outside-task-context",
+          drift: true,
+        }),
+      ]);
+      expect(resDefaultDepth.verdict).toBe("WARN");
+    } finally {
+      repo.git("reset", "-q", "--hard", "HEAD~1");
+    }
   });
 
   it.todo(
     "F1 follow-up (#58 Fix B, needs Maintainer Decision H-91): count source/errors/HTTPError.ts in task scope when the task packet selected code/tests owned by that file (in-task-context, PASS)",
   );
 
-  it("F1c: pins current 0.3.3 behavior (in-task-context, PASS when task names HTTPError and diff edits the HTTPError class body)", async () => {
+  it("F1c: pins current next behavior (in-task-context, PASS when task names HTTPError and diff edits the HTTPError class body)", async () => {
     reset();
     repo.edit(
       "source/errors/HTTPError.ts",
@@ -255,7 +258,7 @@ describe("Issue #58 ([C260]): task-scope relevance pinned fixtures (F1, F1c, F2,
     expect(res.verdict).toBe("PASS");
   });
 
-  it("F2: pins current 0.3.3 behavior (basename with extension HTTPError.ts is not an exact path or symbol seed under H-79; assert seed and claim reason only)", async () => {
+  it("F2: pins current next behavior (basename with extension HTTPError.ts is not an exact path or symbol seed under H-79; assert seed and claim reason only)", async () => {
     reset();
     repo.edit(
       "source/errors/HTTPError.ts",
@@ -281,7 +284,7 @@ describe("Issue #58 ([C260]): task-scope relevance pinned fixtures (F1, F1c, F2,
     expect(["in-task-context", "outside-task-context"]).toContain(claims[0]?.reason);
   });
 
-  it("N1: pins current 0.3.3 behavior (unrelated src/billing/invoice.ts is outside-task-context, WARN and must stay WARN under Fix B)", async () => {
+  it("N1: pins current next behavior (unrelated src/billing/invoice.ts is outside-task-context, WARN and must stay WARN under Fix B)", async () => {
     reset();
     repo.edit(
       "src/billing/invoice.ts",
@@ -303,7 +306,7 @@ describe("Issue #58 ([C260]): task-scope relevance pinned fixtures (F1, F1c, F2,
     expect(res.verdict).toBe("WARN");
   });
 
-  it("N2: pins current 0.3.3 behavior (editing unrelated function parseRetryAfter in src/client.ts, which only imports HTTPError, is outside-task-context and must not spread through imports)", async () => {
+  it("N2: pins current next behavior (editing unrelated function parseRetryAfter in src/client.ts, which only imports HTTPError, is outside-task-context and must not spread through imports)", async () => {
     reset();
     repo.edit(
       "src/client.ts",
@@ -337,26 +340,35 @@ describe("Issue #58 ([C260]): task-scope relevance pinned fixtures (F1, F1c, F2,
     reset();
     repo.write(".duo-project/project.yaml", PROJECT_YAML_DEFAULT_DEPTH);
     repo.git("commit", "-qam", "use default max_depth: 2");
-    repo.edit(
-      "src/client.ts",
-      "  return Number.isFinite(seconds) ? seconds : 0;",
-      "  return Number.isFinite(seconds) && seconds >= 0 ? seconds : 0;",
-    );
-    const resDefaultDepth = await runReview(repo, { task: TASK_F1, diff: W });
-    expect(scopeClaims(resDefaultDepth)).toEqual([
-      expect.objectContaining({
-        rule: "scope-relevance",
-        subject: { kind: "file", id: "src/client.ts" },
-        alignment: "UNKNOWN",
-        reason: "outside-task-context",
-        drift: true,
-      }),
-    ]);
-    expect(resDefaultDepth.verdict).toBe("WARN");
-    repo.git("reset", "-q", "--hard", "HEAD~1");
+    try {
+      repo.edit(
+        "src/client.ts",
+        "  return Number.isFinite(seconds) ? seconds : 0;",
+        "  return Number.isFinite(seconds) && seconds >= 0 ? seconds : 0;",
+      );
+      const ctxDefaultDepth = await runContext(repo, TASK_F1);
+      expect(ctxDefaultDepth.status).toBe("ready");
+      expect(ctxDefaultDepth.packet?.code.map((c) => c.id)).toContain("sym:src/client.ts#createError");
+      expect(ctxDefaultDepth.packet?.code.map((c) => c.id)).not.toContain("file:src/client.ts");
+      expect(ctxDefaultDepth.packet?.code.map((c) => c.id)).not.toContain("sym:src/client.ts#parseRetryAfter");
+
+      const resDefaultDepth = await runReview(repo, { task: TASK_F1, diff: W });
+      expect(scopeClaims(resDefaultDepth)).toEqual([
+        expect.objectContaining({
+          rule: "scope-relevance",
+          subject: { kind: "file", id: "src/client.ts" },
+          alignment: "UNKNOWN",
+          reason: "outside-task-context",
+          drift: true,
+        }),
+      ]);
+      expect(resDefaultDepth.verdict).toBe("WARN");
+    } finally {
+      repo.git("reset", "-q", "--hard", "HEAD~1");
+    }
   });
 
-  it("N3: pins current 0.3.3 behavior (no task emits no scope-relevance claims and records no-task-scope limitation)", async () => {
+  it("N3: pins current next behavior (no task emits no scope-relevance claims and records no-task-scope limitation)", async () => {
     reset();
     repo.edit(
       "source/errors/HTTPError.ts",
