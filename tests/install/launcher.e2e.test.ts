@@ -65,7 +65,7 @@ for (const agent of ["codex", "claude-code"] as const) {
         const human = duoctl(p.root, [...args, "--locale", locale], "", env());
         expect(human.code).toBe(0);
         for (const text of ["launcher-version-mismatch", VERSION, "0.2.0", resolved, `duoctl install ${agent} --launcher npx`]) expect(human.stdout).toContain(text);
-        expect(human.stdout).toContain(locale === "ko" ? "전역 DUO" : "global DUO");
+        expect(human.stdout).toContain(locale === "ko" ? `${resolved}의 DUO` : `DUO installation at ${resolved}`);
       }
     });
 
@@ -97,6 +97,43 @@ for (const agent of ["codex", "claude-code"] as const) {
       const output = human.stdout + human.stderr;
       expect(output).toContain("--launcher npx");
       expect(output).not.toContain("Verify: ok");
+    });
+
+    // #40-5: doctor reaches the same verification as install, with the CLI version passed in (40-4).
+    const checkId = agent === "codex" ? "agent.codex" : "agent.claude_code";
+    const doctor = (extra: string[] = []) => duoctl(p.root, ["doctor", ...extra], "", env());
+    const agentCheck = (run: ReturnType<typeof doctor>) => run.json().result.checks.find((c: { id: string }) => c.id === checkId);
+
+    it("doctor: an older global server is a version-mismatch warning with both versions and the npx step; exit 0", () => {
+      server(global, "0.2.0", EXPECTED_MCP_TOOLS);
+      const json = doctor(["--json"]);
+      expect(json.code).toBe(0);
+      expect(agentCheck(json)).toMatchObject({
+        status: "warning", reason: "version-mismatch", facts: { cliVersion: VERSION, serverVersion: "0.2.0", resolved },
+        actions: [{ id: "align-launcher", commands: [`duoctl install ${agent} --launcher npx`] }],
+      });
+      expect(json.json().result.next).toContainEqual(expect.objectContaining({ id: "align-launcher" }));
+      for (const locale of ["en", "ko"]) {
+        const human = doctor(["--locale", locale]);
+        expect(human.code).toBe(0);
+        for (const text of [VERSION, "0.2.0", resolved, `duoctl install ${agent} --launcher npx`]) expect(human.stdout).toContain(text);
+      }
+    });
+
+    it("doctor: a tool-list failure stays an error (exit 6) despite the version difference; a matching version is verified", () => {
+      server(global, "0.2.0", EXPECTED_MCP_TOOLS.slice(1));
+      const failed = doctor(["--json"]);
+      expect(failed.code).toBe(6);
+      expect(agentCheck(failed)).toMatchObject({ status: "error", reason: "mcp-tools-mismatch", facts: { version: "0.2.0" } });
+      server(global, VERSION, EXPECTED_MCP_TOOLS);
+      expect(agentCheck(doctor(["--json"]))).toMatchObject({ status: "ok", reason: "verified" });
+    });
+
+    it("remove still works when the effective PATH has no launcher, and leaves no DUO entry", () => {
+      const removed = duoctl(p.root, ["install", "remove", agent, "--yes", "--json"], "", env([local], false));
+      expect(removed.code).toBe(0);
+      const target = path.join(p.root, agent === "codex" ? ".codex/config.toml" : ".mcp.json");
+      expect(fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "").not.toContain("duo-director");
     });
   });
 }

@@ -326,7 +326,7 @@ export async function verifyAgentIntegration(root: string, agent: AgentId, optio
       if (options.cliVersion && version && options.cliVersion !== version && launch.resolved !== undefined) {
         warnings.push({
           code: "launcher-version-mismatch", cliVersion: options.cliVersion, serverVersion: version, resolved: launch.resolved,
-          nextActions: [`Update the global DUO installation to ${options.cliVersion}.`, `duoctl install ${agent} --launcher npx`],
+          nextActions: [`Update the DUO installation at ${launch.resolved} to ${options.cliVersion}.`, `duoctl install ${agent} --launcher npx`],
         });
       }
       const status = probe.status as { index?: { status?: string } | null; baseline?: { status?: string } | null } | null;

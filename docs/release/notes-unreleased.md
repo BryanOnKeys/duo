@@ -1,6 +1,6 @@
 # Unreleased: launcher verification (#40-1 through #40-3)
 
-Draft notes for PR #75. This is not release authorization; shipping as 0.3.4 remains a separate maintainer decision. 40-4 doctor mismatch guidance and 40-5 broader validation remain follow-up work.
+Draft notes for #40 (PR #75 and its 40-4/40-5 follow-up). This is not release authorization; shipping as 0.3.4 remains a separate maintainer decision.
 
 `duoctl install` uses the same effective PATH for planning, launcher lookup and its MCP probe. Under measured runner signatures, project/ancestor/cache `node_modules/.bin` entries are removed for the default PATH launcher. Explicit npx and custom/absolute launchers keep their existing PATH behavior. Generated config still records portable commands.
 
@@ -15,6 +15,8 @@ Under a matched runner, every `node_modules/.bin` on PATH is removed, including 
 ## Version warning
 
 When both the running CLI and launched MCP server report known, non-empty, exactly different version strings, install reports `launcher-version-mismatch` with both versions, the resolved launcher path and safe remediation. Human output supports en/ko; JSON adds an optional `verify.warnings` array. The warning alone does not change success or exit status. Missing/empty versions are unknown; no semver-range interpretation occurs. Updates and launcher changes require a user action.
+
+`duoctl doctor` reports the same difference: a connected agent whose checks all pass shows warning `version-mismatch` (facts `cliVersion`, `serverVersion`, `resolved`; action `align-launcher`) instead of `verified`. Errors such as a tool-list mismatch are unchanged, and doctor still exits 0 for warnings. The remediation text names the resolved installation rather than "the global DUO installation".
 
 ## Coverage and limits
 
