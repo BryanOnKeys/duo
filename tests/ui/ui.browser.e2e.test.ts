@@ -1,3 +1,5 @@
+/// <reference lib="dom" />
+
 /**
  * T18.1 browser E2E: the real local server and the bundled UI in a headless browser (the installed
  * pinned Playwright Chromium in CI, or installed Chrome/Edge locally). Skipped locally without a browser.
@@ -208,6 +210,45 @@ describe("DUO UI in a browser (T18.1)", () => {
       revisionResponses: revisionResponses.length,
       maxMapDurationMs: Math.max(...mapResponses.map((r) => r.durationMs ?? 0)),
       maxRevisionDurationMs: Math.max(...revisionResponses.map((r) => r.durationMs ?? 0)) })}`);
+  });
+
+  it("supports keyboard skip navigation and native decision-dialog focus handling", async (ctx) => {
+    if (browser === undefined) return ctx.skip();
+    const r = repo("review/app");
+    const service = createDecisionService({ root: r.root });
+    const proposalId = (await service.propose(
+      { kind: "agent", name: "codex" },
+      { title: "Keyboard audit proposal", question: "keyboard_audit", answer: "test the dialog" },
+    )).value?.proposalId ?? "";
+    expect(proposalId).not.toBe("");
+    await r.index();
+    const { page, server, errors } = await open(r.root);
+
+    // The skip link takes keyboard users directly to the page's focusable main landmark.
+    const skip = page.getByRole("link", { name: "Skip to content" });
+    await skip.focus();
+    await page.keyboard.press("Enter");
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("main");
+
+    // Normal navigation remains operable with Enter and exposes the destination as a real URL.
+    const decisions = page.getByRole("navigation").getByRole("link", { name: "Pending decisions", exact: true });
+    await decisions.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL(`${server.origin}/decisions`);
+
+    const card = page.getByRole("article").filter({ hasText: proposalId });
+    const confirm = card.getByRole("button", { name: "Confirm…" });
+    await confirm.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: `Confirm ${proposalId}?` });
+    await dialog.waitFor();
+    expect(await page.evaluate(() => document.activeElement?.getAttribute("aria-describedby"))).toBe(`c-${proposalId}`);
+
+    // Escape closes the modal without an action and returns keyboard focus to its trigger.
+    await page.keyboard.press("Escape");
+    expect(await dialog.isVisible()).toBe(false);
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe("Confirm…");
+    expect(errors).toEqual([]);
   });
 
   it("overview, direction, context, review, confirm and reject, stale index and a deep link", async (ctx) => {

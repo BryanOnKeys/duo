@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:ui:a11y": "pnpm build && vitest run --config vitest.ui-a11y.config.ts",
     "test:grammars": "vitest run packages/analyzer/src/language/tree-sitter/grammars.test.ts",
     "pack:cli": "node scripts/pack-cli.mjs",
     "release:lock": "pnpm build && node scripts/release-lock.mjs",
@@ -35,6 +36,7 @@
     "duoctl": "node apps/cli/dist/main.js"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@duo-director/analyzer": "workspace:*",
     "@duo-director/core": "workspace:*",
     "@duo-director/director": "workspace:*",
