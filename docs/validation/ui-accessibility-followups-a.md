@@ -31,6 +31,12 @@ Compared with audit run `2026-10-23T07-36-04-993Z-25256` on the same 120 case ID
 
 The 1280px screens and both themes are included in the full audit. A separate browser regression checks all 12 routes at 320px in light and dark themes, both Decision dialogs with long unbroken content, and those routes at 1280px.
 
+## Code verification
+
+- `pnpm verify`: passed; 142 test files, 1,331 passed, 7 skipped, 5 TODO; documentation validation passed for 151 files.
+- `pnpm exec vitest run tests/ui/ui.browser.e2e.test.ts --reporter=verbose`: passed, 8/8 tests. This includes the mobile layout, Decision dialog, Work map keyboard selection, and Work map axe `nested-interactive` checks.
+- `pnpm test:ui:a11y`: passed at the tested HEAD; 120 cases, 0 missing/duplicate IDs, 0 tool errors, 0 cleanup errors, `executionComplete: true`, `accessibilityVerificationComplete: false`.
+
 ## Issue links
 
 - [#70 Mobile horizontal overflow](https://github.com/kanghyunsoon/duo/issues/70)
