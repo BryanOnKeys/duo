@@ -10,10 +10,12 @@ A launcher that existed only on the installer's injected PATH is no longer repor
 
 Probing the actual older global binary can also reveal a different server/tool list. Those MCP failures remain failures, even when a version warning is present.
 
+Under a matched runner, every `node_modules/.bin` on PATH is removed, including one the user added before running the installer (for example with direnv). If `duoctl` was only reachable there, install now fails although an agent started from the same shell would find it. Reinstall with `--launcher npx` or install `duoctl` globally.
+
 ## Version warning
 
 When both the running CLI and launched MCP server report known, non-empty, exactly different version strings, install reports `launcher-version-mismatch` with both versions, the resolved launcher path and safe remediation. Human output supports en/ko; JSON adds an optional `verify.warnings` array. The warning alone does not change success or exit status. Missing/empty versions are unknown; no semver-range interpretation occurs. Updates and launcher changes require a user action.
 
 ## Coverage and limits
 
-Measured on Windows: npm 12.0.1 npx/exec/run, pnpm 11.25.0 exec, Yarn Classic 1.22.22 run. pnpm dlx has no distinguishing values in the measured markers and retains the previous behavior. Other versions, npm `run-script` signatures, Yarn Berry/PnP, POSIX runner invocations and GUI PATH equivalence are not claimed. See the [design and runner evidence](../roadmap/issue-40-launcher-verification-design.md).
+Measured on Windows: npm 12.0.1 npx/exec/run, pnpm 11.25.0 exec, Yarn Classic 1.22.22 run (partial: Yarn's own `Yarn\bin` and temporary shim directory stay on PATH). pnpm dlx has no distinguishing values in the measured markers and retains the previous behavior. npm lifecycle shortcuts such as `npm test`/`npm start`, npm `run-script` signatures and `pnpm run` were not measured and keep the previous behavior. Other versions, Yarn Berry/PnP, POSIX runner invocations and GUI PATH equivalence are not claimed. See the [design and runner evidence](../roadmap/issue-40-launcher-verification-design.md).

@@ -63,9 +63,12 @@ The actual Windows measurements are in [issue-40-runner-evidence.json](issue-40-
 | `npm run probe --silent` | `run` | `npm/bin/npm-cli.js` | `probe` | Covered |
 | `pnpm exec duo-runner-env-probe` | `exec` | unset | unset | Covered; injected relative `./node_modules/.bin` is also removed |
 | `pnpm --package <local-tarball> dlx duo-runner-env-probe` | unset | unset | unset | **Gap:** cannot identify from these markers; retains current behavior |
-| Yarn 1 `yarn --silent run probe` | unset | `yarn/bin/yarn.js` | `probe` | Covered |
+| Yarn 1 `yarn --silent run probe` | unset | `yarn/bin/yarn.js` | `probe` | **Partial:** project and `Yarn\Data\link\node_modules\.bin` are removed; the prepended `Yarn\bin` (where `yarn global add` installs binaries) and the temporary `yarn--<id>` shim directory are kept, so a `duoctl` there still verifies whether or not the agent PATH contains it |
+| npm lifecycle shortcuts (`npm test`, `npm start`, …) | `test`, `start`, … (not measured) | — | — | **Gap (not measured):** not matched; retains current behavior |
+| npm versions reporting `run-script` | `run-script` (not measured) | — | — | **Gap (not measured):** not matched; retains current behavior |
+| `pnpm run <script>` | not measured | — | — | **Gap (not measured):** coverage unknown; not claimed |
 
-Selected activation for a `path` launcher: `npm_command` is `exec` or `run`, or a non-empty `npm_lifecycle_event` accompanies an `npm_execpath` ending in `yarn.js`. This is deliberately limited to the measured signatures. npm versions reporting `run-script`, Yarn Berry/PnP, other runner versions and actual POSIX runner invocations are not validated coverage. The marker-free pnpm dlx case remains unfixed; it is not inferred to be supported.
+Selected activation for a `path` launcher: `npm_command` is `exec` or `run`, or a non-empty `npm_lifecycle_event` accompanies an `npm_execpath` ending in `yarn.js`. This is deliberately limited to the measured signatures. The unmeasured forms above, Yarn Berry/PnP, other runner versions and actual POSIX runner invocations are not validated coverage; where the predicate does not fire, the original #40 behavior remains. The marker-free pnpm dlx case remains unfixed; it is not inferred to be supported.
 
 Planning and verification share `effectiveLauncherHost`; executable lookup and the MCP probe use that same effective environment. It removes normalized terminal `node_modules/.bin` directory entries, including project, ancestor and cache bins, while keeping the other entries in order. Windows case/separators/PATH-key casing and PATHEXT are preserved; POSIX path matching is case-sensitive. Explicit `npx` and custom/absolute launchers retain the original PATH. The supplied host and real process environment are never mutated, and no machine path is written into generated config.
 
@@ -93,6 +96,7 @@ Pack it with `npm pack --ignore-scripts` and install the local tarball as a devD
 
 - The previously hidden no-launcher case now fails under D1: pre-apply planning blocks with exit 6; a reached verification failure returns exit 1. No unavailable launcher is reported as verified.
 - An actual older global binary can start but expose a different tool list. The existing `mcp-launch` check compares its tools with this build's `EXPECTED_MCP_TOOLS` (and checks the server name), so verification can now fail where probing the injected local binary currently passes. Keep that validation intact and report the real result; the install verification branch then returns `EXIT.ERROR`.
+- When the predicate fires, the filter removes **every** terminal `node_modules/.bin` entry, including one the user put on PATH before running the installer (for example a project bin added by direnv). Runner additions are a contiguous prefix in the evidence, but Yarn's prefix also contains non-bin directories, so prefix-only filtering is not attempted. Such a user can now get the D1 failure even though an agent started from the same shell would find `duoctl`. Remedy: reinstall with `--launcher npx`, or install `duoctl` globally. A unit test pins this behavior.
 
 The unchanged-success/exit-code claim applies only to adding the 40-3 version-mismatch warning itself, as confirmed in D2. It is not a promise for 40-2 or the whole issue. A matching or unknown version does not override a failed launcher, server-name or tool-list check.
 

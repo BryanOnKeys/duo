@@ -33,6 +33,7 @@ export function effectiveLauncherHost(launcher: DuoLauncher, host: HostEnvironme
   const injectedBin = host.platform === "win32" ? /(?:^|[\\/])node_modules[\\/]\.bin[\\/]*$/iu : /(?:^|\/)node_modules\/\.bin\/*$/u;
   const effective = pathValue(host).split(host.platform === "win32" ? ";" : ":")
     .filter((dir) => !injectedBin.test(api.normalize(dir))).join(host.platform === "win32" ? ";" : ":");
+  // shortcut: also drops user-added node_modules/.bin entries; prefix-only filtering needs per-runner evidence (Yarn mixes in non-bin dirs).
   // shortcut: pnpm dlx has none of these markers; extend only after recording distinguishing runner evidence.
   const nextEnv = { ...env, [key]: effective };
   if (host.platform === "win32") for (const k of Object.keys(nextEnv)) if (k.toUpperCase() === "PATH") nextEnv[k] = effective;

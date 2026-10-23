@@ -63,6 +63,20 @@ describe("measured runner activation and PATH boundaries", () => {
     const direct = { ...host, env: { PATH: host.env.PATH } };
     expect(effectiveLauncherHost(PATH_LAUNCHER, direct)).toBe(direct);
   });
+  it("pins documented limits: user-added bins are dropped, unmeasured npm forms and Yarn's own dirs are kept", () => {
+    const userBin = "/work/myapp/node_modules/.bin";
+    const exec: HostEnvironment = { platform: "linux", env: { PATH: `/project/node_modules/.bin:${userBin}:/global`, npm_command: "exec" } };
+    expect(effectiveLauncherHost(PATH_LAUNCHER, exec).env.PATH).toBe("/global");
+    for (const npm_command of ["test", "start", "run-script"]) {
+      const unmeasured: HostEnvironment = { platform: "linux", env: { PATH: exec.env.PATH as string, npm_command } };
+      expect(effectiveLauncherHost(PATH_LAUNCHER, unmeasured)).toBe(unmeasured);
+    }
+    const yarn: HostEnvironment = { platform: "win32", env: {
+      Path: "C:\\T\\yarn--1-0.5;C:\\p\\node_modules\\.bin;C:\\U\\Yarn\\Data\\link\\node_modules\\.bin;C:\\U\\Yarn\\bin;C:\\g",
+      npm_execpath: "C:\\tools\\yarn\\bin\\yarn.js", npm_lifecycle_event: "probe",
+    } };
+    expect(effectiveLauncherHost(PATH_LAUNCHER, yarn).env.Path).toBe("C:\\T\\yarn--1-0.5;C:\\U\\Yarn\\bin;C:\\g");
+  });
 });
 
 for (const adapter of [codexAdapter, claudeCodeAdapter]) {
