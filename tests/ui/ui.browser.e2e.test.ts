@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDefaultAnalyzerRegistry, type AnalyzerRegistry } from "@duo-director/analyzer";
 import { createDecisionService, definitionRef, nodeId } from "@duo-director/core";
-import { captureAdoptionBaseline } from "@duo-director/director";
+import { captureAdoptionBaseline, recordReview, reviewChanges } from "@duo-director/director";
 import { indexRepository, openProjectGraphStore } from "@duo-director/graph";
 import { LLMProviderPool, startDuoUiServer, type DuoUiServer } from "@duo-director/integration";
 import { completeWorkTask, recordWorkReview, touchWorkTask } from "../../packages/integration/src/http/work-map.js";
@@ -127,6 +127,90 @@ describe("DUO UI in a browser (T18.1)", () => {
     expect(accessibility.violations).toEqual([]);
     expect(await page.getByText("Loading…").count()).toBe(0);
     expect(errors).toEqual([]);
+  });
+
+  it("keeps mobile pages and Decision dialogs within the viewport", async (ctx) => {
+    if (browser === undefined) return ctx.skip();
+    const r = repo("review/app");
+    const service = createDecisionService({ root: r.root });
+    const proposalId = (await service.propose({ kind: "agent", name: "codex" }, {
+      title: `Mobile layout ${"identifier".repeat(12)}`, question: "mobile_layout", answer: `private/path/${"x".repeat(160)}`,
+    })).value?.proposalId;
+    if (proposalId === undefined) throw new Error("Could not create mobile layout proposal");
+    await r.index();
+    const graph = openProjectGraphStore(r.root).value;
+    if (graph === undefined) throw new Error("Could not open graph for mobile layout fixture");
+    let reviewId: string;
+    try {
+      const review = await reviewChanges(r.root, { task: "RPT-01", diff: { from: "HEAD", to: "WORKTREE" } }, { graph, registry });
+      if (review.value === undefined) throw new Error("Could not create mobile review fixture");
+      const recorded = await recordReview(review.value.result, { root: r.root, actor: { kind: "human", name: "Mobile layout" }, clock: () => new Date("2026-10-22T00:00:00.000Z") });
+      if (recorded.value?.id === undefined) throw new Error("Could not persist mobile review fixture");
+      reviewId = recorded.value.id;
+    } finally { graph.close(); }
+    const server = await startDuoUiServer({ root: r.root, version: "e2e", registry, llm: new LLMProviderPool({}) });
+    servers.push(server);
+    const context = await (browser as Browser).newContext({ viewport: { width: 320, height: 800 }, colorScheme: "light" });
+    const page = await context.newPage();
+    await page.goto(server.launchUrl);
+    const routes = ["/overview", "/direction", "/decisions", "/work", "/graph?node=RPT-01", "/coverage", "/context", "/review", "/reviews", "/search?q=RPT-01", "/entity/RPT-01", `/reviews/${reviewId}`];
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.setViewportSize({ width: 320, height: 800 });
+      await page.emulateMedia({ colorScheme });
+      for (const route of routes) {
+        await page.goto(`${server.origin}${route}`);
+        await page.getByRole("heading", { level: 1 }).waitFor();
+        await page.waitForFunction(() => !document.body.innerText.includes("Loading…"));
+        const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth, inner: window.innerWidth,
+          rootWidths: [document.documentElement, document.body, document.querySelector(".layout"), document.querySelector("main")].map((element) => element === null ? null : `${element.tagName}.${String(element.className)} ${element.getBoundingClientRect().width} rect ${element.scrollWidth}/${element.clientWidth}`),
+          offenders: [...document.querySelectorAll<HTMLElement>("body *")].map((element) => ({ element, rect: element.getBoundingClientRect() }))
+            .filter(({ rect }) => rect.right > window.innerWidth + 1 || rect.left < -1)
+            .sort((a, b) => b.rect.right - a.rect.right).slice(0, 8)
+            .map(({ element, rect }) => `${element.tagName.toLowerCase()}.${String(element.className).slice(0, 50)} ${Math.round(rect.left)}..${Math.round(rect.right)} (${element.scrollWidth}/${element.clientWidth})`) }));
+        expect(width.scroll, `${colorScheme} ${route} document width ${JSON.stringify(width)}`).toBeLessThanOrEqual(width.client);
+      }
+
+      await page.goto(`${server.origin}/decisions`);
+      await page.getByRole("heading", { name: "Pending decisions", level: 1 }).waitFor();
+      await page.waitForFunction(() => !document.body.innerText.includes("Loading…"));
+      const card = page.getByRole("article").filter({ hasText: proposalId });
+      expect(await card.count(), `${colorScheme} proposal card: ${(await page.locator("body").innerText()).slice(-700)}`).toBe(1);
+      await card.getByRole("button", { name: "Confirm…" }).click();
+      const confirm = page.getByRole("dialog", { name: `Confirm ${proposalId}?` });
+      await confirm.waitFor();
+      const confirmWidth = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+        dialog: document.querySelector("dialog[open]")?.getBoundingClientRect().width ?? 0 }));
+      expect(confirmWidth.document, `${colorScheme} confirm document width`).toBeLessThanOrEqual(confirmWidth.viewport);
+      expect(confirmWidth.dialog, `${colorScheme} confirm dialog width`).toBeLessThanOrEqual(288);
+      await confirm.getByRole("button", { name: "Cancel" }).click();
+
+      await card.getByRole("button", { name: "Reject…" }).click();
+      const reject = page.getByRole("dialog", { name: `Reject ${proposalId}?` });
+      await reject.waitFor();
+      await reject.getByLabel("Reason (optional)").fill(`private/path/${"y".repeat(160)}`);
+      const rejectWidth = await page.evaluate(() => ({ document: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth,
+        dialog: document.querySelector("dialog[open]")?.getBoundingClientRect().width ?? 0 }));
+      expect(rejectWidth.document, `${colorScheme} reject document width`).toBeLessThanOrEqual(rejectWidth.viewport);
+      expect(rejectWidth.dialog, `${colorScheme} reject dialog width`).toBeLessThanOrEqual(288);
+      await reject.getByRole("button", { name: "Cancel" }).click();
+
+      await page.setViewportSize({ width: 1280, height: 800 });
+      for (const route of routes) {
+        await page.goto(`${server.origin}${route}`);
+        await page.getByRole("heading", { level: 1 }).waitFor();
+        await page.waitForFunction(() => !document.body.innerText.includes("Loading…"));
+        const desktopWidth = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
+        expect(desktopWidth.scroll, `${colorScheme} 1280px ${route} document width`).toBeLessThanOrEqual(desktopWidth.client);
+      }
+    }
+
+    await page.goto(`${server.origin}/decisions`);
+    await page.getByRole("heading", { name: "Pending decisions", level: 1 }).waitFor();
+    await page.getByRole("article").filter({ hasText: proposalId }).getByRole("button", { name: "Confirm…" }).click();
+    const desktopDialogWidth = await page.locator("dialog[open]").evaluate((dialog) => dialog.getBoundingClientRect().width);
+    expect(desktopDialogWidth).toBeLessThanOrEqual(720);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+    await context.close();
   });
 
   it("keeps Work map keyboard selection, detail and refresh state synchronized", async (ctx) => {

@@ -1,7 +1,7 @@
 /** Review screen (T18.1): the Review service as it is. Never indexes, never records. */
 import { useState } from "react";
 import { api } from "../api.js";
-import { Command, Empty, ErrorBox, Label, Page, Provenance, Section, Verdict } from "../components.js";
+import { Command, Empty, ErrorBox, Label, Page, Provenance, Section, TableScroll, Verdict } from "../components.js";
 import { authorityParts } from "../authority.js";
 import { GapList } from "./context.js";
 import { EvidenceList } from "./evidence.js";
@@ -13,7 +13,7 @@ export function ClaimTable(props: { readonly claims: readonly Claim[]; readonly 
   const [open, setOpen] = useState<string | undefined>();
   if (props.claims.length === 0) return <Empty>No claims.</Empty>;
   return (
-    <table>
+    <TableScroll label="Review claims"><table>
       <thead><tr><th scope="col">Alignment</th><th scope="col">Rule</th><th scope="col">Subject</th><th scope="col">Reason</th><th scope="col">Provenance</th><th scope="col">Evidence</th></tr></thead>
       <tbody>{props.claims.map((c) => (
         <tr key={c.id}>
@@ -27,7 +27,7 @@ export function ClaimTable(props: { readonly claims: readonly Claim[]; readonly 
           </td>
         </tr>
       ))}</tbody>
-    </table>
+    </table></TableScroll>
   );
 }
 
