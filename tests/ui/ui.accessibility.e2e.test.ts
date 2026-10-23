@@ -7,7 +7,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { AxeBuilder } from "@axe-core/playwright";
-import { assessTable, atomicWriteJson, atomicWriteText, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, sanitizeAuditArtifact, serializeAuditError, storeAuditRecord, writeAuditSummary, type AuditRecord, type AuditTableSnapshot, type SerializedAuditError } from "./ui-a11y-artifacts.js";
+import { assertNoPrivatePathsInEvidence, assessTable, atomicWriteJson, atomicWriteText, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, sanitizeAuditArtifact, serializeAuditError, storeAuditRecord, writeAuditSummary, type AuditRecord, type AuditTableSnapshot, type SerializedAuditError } from "./ui-a11y-artifacts.js";
 import { createDefaultAnalyzerRegistry, type AnalyzerRegistry } from "@duo-director/analyzer";
 import { createDecisionService } from "@duo-director/core";
 import { recordReview, reviewChanges } from "@duo-director/director";
@@ -470,6 +470,7 @@ afterAll(async () => {
   for (const result of results) atomicWriteJson(path.join(outputDir, result.id.replaceAll(/[^\w.-]/gu, "_"), "result.json"), sanitizeAuditArtifact(result));
   atomicWriteText(casesPath, `${results.map((result) => JSON.stringify(sanitizeAuditArtifact(result))).join("\n")}\n`);
   writeAuditSummary(summaryPath, sanitizeAuditArtifact(runSummary));
+  assertNoPrivatePathsInEvidence(summaryPath, casesPath, ROOT, os.homedir());
   expect(executionComplete, `Audit execution incomplete: ${JSON.stringify({ missingCases, duplicateCases, outcomes, finalCleanupErrors })}`).toBe(true);
 });
 

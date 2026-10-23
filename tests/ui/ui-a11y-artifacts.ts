@@ -132,6 +132,28 @@ export function sanitizeAuditArtifact(value: unknown): unknown {
   return result;
 }
 
+export function assertNoPrivatePathsInEvidence(summaryPath: string, casesPath: string, repositoryRoot: string, homeDirectory: string): void {
+  const normalize = (value: string) => value.replaceAll("\\", "/").replace(/\/+$/u, "");
+  const insensitive = (value: string) => /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith("\\\\");
+  const candidates = [repositoryRoot, homeDirectory].filter(Boolean).map((value) => ({
+    value: normalize(value), ignoreCase: insensitive(value),
+  }));
+  const includesPath = (text: string, candidate: typeof candidates[number]): boolean => {
+    const haystack = normalize(text);
+    return candidate.ignoreCase
+      ? haystack.toLocaleLowerCase("en-US").includes(candidate.value.toLocaleLowerCase("en-US"))
+      : haystack.includes(candidate.value);
+  };
+  const inspect = (value: unknown): void => {
+    if (typeof value === "string") {
+      if (candidates.some((candidate) => includesPath(value, candidate))) throw new Error("Private path found in shareable accessibility evidence");
+    } else if (Array.isArray(value)) value.forEach(inspect);
+    else if (value !== null && typeof value === "object") Object.values(value).forEach(inspect);
+  };
+  inspect(JSON.parse(fs.readFileSync(summaryPath, "utf8")));
+  for (const line of fs.readFileSync(casesPath, "utf8").split(/\r?\n/u).filter(Boolean)) inspect(JSON.parse(line));
+}
+
 export async function runAuditLifecycle<T>(options: {
   readonly run: (attemptIndex: number) => Promise<T>;
   readonly cleanup: (attemptIndex: number) => Promise<readonly AuditCleanupError[]>;

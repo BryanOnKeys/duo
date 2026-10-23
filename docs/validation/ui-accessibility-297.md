@@ -83,3 +83,13 @@ Jira 이슈 `S15P31A106-297`은 조회 가능했다. 앞서 단축 키 `297`로 
 최신 실행 `2026-10-23T00-08-53-025Z-30420`: 총 120건, 누락 0, 중복 0, 도구 오류 0, 제품 문제 30건, 미검증 상태 78건(미검증 finding이 포함된 사례 108개). `executionComplete: true`, `accessibilityVerificationComplete: false`.
 
 정제 요약 예시: `{"schemaVersion":3,"caseCount":120,"executionComplete":true,"accessibilityVerificationComplete":false}`.
+
+
+## 제품 문제 후속 이슈
+
+감사에서 발견한 제품 문제는 별도 이슈로 추적한다.
+
+- 모바일 화면 및 Decision 대화상자 가로 overflow: [#70](https://github.com/kanghyunsoon/duo/issues/70)
+- Work map 키보드 선택 후 상세 패널 미갱신: [#71](https://github.com/kanghyunsoon/duo/issues/71)
+- Work map `nested-interactive` 위반: [#72](https://github.com/kanghyunsoon/duo/issues/72)
+- Overview 키보드 순서의 BODY sentinel: [#73](https://github.com/kanghyunsoon/duo/issues/73)

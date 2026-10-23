@@ -2,13 +2,32 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assessTable, atomicWriteJson, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, sanitizeAuditArtifact, serializeAuditError, storeAuditRecord } from "./ui-a11y-artifacts.js";
+import { assertNoPrivatePathsInEvidence, assessTable, atomicWriteJson, compareFocusSequence, hasUnverifiedFindings, runAuditLifecycle, sanitizeAuditArtifact, serializeAuditError, storeAuditRecord } from "./ui-a11y-artifacts.js";
 
 const tempDirs: string[] = [];
 function tempDir(): string { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "duo-a11y-artifacts-")); tempDirs.push(dir); return dir; }
 afterEach(() => { for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe("UI accessibility audit artifacts", () => {
+  it("checks persisted JSON and JSONL recursively and rejects malformed or missing evidence", () => {
+    const dir = tempDir();
+    const summary = path.join(dir, "summary.json");
+    const cases = path.join(dir, "cases.jsonl");
+    const root = path.join(dir, "RepoRoot");
+    const home = path.join(dir, "HomeRoot");
+    atomicWriteJson(summary, { nested: [{ text: "clean relative/path" }] });
+    fs.writeFileSync(cases, `${JSON.stringify({ nested: ["clean", `prefix ${root}/private.ts`] })}\n`);
+    expect(() => assertNoPrivatePathsInEvidence(summary, cases, root, home)).toThrow(/Private path/u);
+    fs.writeFileSync(cases, `${JSON.stringify({ path: "c:\\USERS\\HOME\\secret" })}\n`);
+    expect(() => assertNoPrivatePathsInEvidence(summary, cases, "C:/repo", "C:/Users/Home" )).toThrow(/Private path/u);
+    fs.writeFileSync(cases, `${JSON.stringify({ path: "prefix C:/USERS/HOME/private.ts" })}\n`);
+    expect(() => assertNoPrivatePathsInEvidence(summary, cases, "C:/repo", "C:/Users/Home")).toThrow(/Private path/u);
+    fs.writeFileSync(cases, `${JSON.stringify({ paths: ["C:\\temp\\file", `prefix ${root}/private.ts`] })}\n`);
+    expect(() => assertNoPrivatePathsInEvidence(summary, cases, root, home)).toThrow(/Private path/u);
+    fs.writeFileSync(cases, `${JSON.stringify({ path: "relative/file.ts" })}\n{broken}\n`);
+    expect(() => assertNoPrivatePathsInEvidence(summary, cases, "C:/repo", "C:/Users/Home")).toThrow();
+    expect(() => assertNoPrivatePathsInEvidence(path.join(dir, "missing.json"), cases, root, home)).toThrow();
+  });
   it("removes private paths, git details, and nested error text from shareable output", () => {
     const secret = "C:\\Users\\private\\repo\\secret.ts /home/private/repo/secret.ts \\\\server\\private";
     const artifact = sanitizeAuditArtifact({ cwd: secret, gitStatus: secret, id: "case", error: { name: "Error", message: secret, stack: secret, cause: { message: secret }, errors: [secret] }, detail: "fixture result" }) as Record<string, unknown>;
