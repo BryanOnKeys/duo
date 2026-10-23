@@ -24,15 +24,18 @@ const human = { kind: "human" as const, name: "Ada" };
 const agent = { kind: "agent" as const, name: "codex" };
 
 interface Client { readonly root: string; readonly server: DuoUiServer; readonly cookie: string; readonly csrf: string }
-interface Res { readonly status: number; readonly body: string; json(): { format: string; ok: boolean; data: Record<string, unknown>; error?: { code: string } } }
+interface Res { readonly status: number; readonly headers: http.IncomingHttpHeaders; readonly body: string; json(): { format: string; ok: boolean; data: Record<string, unknown>; error?: { code: string } } }
 
 function send(c: Pick<Client, "server">, method: string, target: string, headers: Record<string, string> = {}, body?: string): Promise<Res> {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port: c.server.port, method, path: target, headers: { Host: "127.0.0.1:" + String(c.server.port), ...headers } }, (res) => {
+    // agent: false, so a restart test on the same port never reuses a keep-alive socket of the previous server run.
+    // Content-Length with a body: Node does not chunk a DELETE body, and without a length the server's parser would see a malformed request.
+    const length: Record<string, string> = body === undefined ? {} : { "Content-Length": String(Buffer.byteLength(body)) };
+    const req = http.request({ agent: false, host: "127.0.0.1", port: c.server.port, method, path: target, headers: { Host: "127.0.0.1:" + String(c.server.port), ...length, ...headers } }, (res) => {
       let text = "";
       res.setEncoding("utf8");
       res.on("data", (x: string) => { text += x; });
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, body: text, json: () => JSON.parse(text) }));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: text, json: () => JSON.parse(text) }));
     });
     req.on("error", reject);
     if (body !== undefined) req.write(body);
@@ -60,12 +63,12 @@ function commit(root: string) {
   git(root, "commit", "-qm", "state");
 }
 
-async function serve(root: string): Promise<Client> {
-  const server = await startDuoUiServer({ root, version: "test", registry, llm: new LLMProviderPool({}), assetsDir: assets });
+async function serve(root: string, port?: number): Promise<Client> {
+  const server = await startDuoUiServer({ root, version: "test", registry, llm: new LLMProviderPool({}), assetsDir: assets, ...(port === undefined ? {} : { port }) });
   servers.push(server);
   const launch = new URL(server.launchUrl);
   const opened = await new Promise<http.IncomingMessage>((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port: server.port, method: "GET", path: launch.pathname + launch.search, headers: { Host: "127.0.0.1:" + String(server.port) } }, resolve);
+    const req = http.request({ agent: false, host: "127.0.0.1", port: server.port, method: "GET", path: launch.pathname + launch.search, headers: { Host: "127.0.0.1:" + String(server.port) } }, resolve);
     req.on("error", reject);
     req.end();
   });
@@ -403,5 +406,158 @@ describe("supersession chain limit is explicit (#53 review)", () => {
     const loop = await detail("D-711");
     expect(loop.chain).toEqual([{ id: "D-711", loop: true }, { id: "D-712", state: "confirmed", authority: "CONFIRMED" }, { id: "D-711", state: "confirmed", authority: "CONFIRMED" }]);
     expect(loop.truncated).toEqual({ older: false, newer: false });
+  });
+});
+
+// BE-API-10 for the Decision read routes (#53), with the request boundaries of preview-api.test.ts. A GET needs the UI
+// session cookie and an allowed Host; Origin and CSRF are checked only on other methods (the server's existing contract),
+// and no CORS header is ever sent. Damaged Truth and Markdown/YAML diagnostics are covered by the tests above.
+const DECISION_ROUTES = ["/api/decisions", "/api/decisions/D-002"] as const;
+
+/** The repository write lock DecisionService takes for mutations; a read must never create or leave it. */
+function lockState(root: string): string {
+  const f = path.join(root, ".duo-project/runtime/locks/decisions.lock");
+  return fs.existsSync(f) ? "present:" + fs.readFileSync(f, "utf8") : "absent";
+}
+function noSecrets(body: string, c: Client) {
+  const secret = c.cookie.split("=")[1] ?? "";
+  for (const s of [c.root, c.root.replaceAll("\\", "/"), c.csrf, ...(secret === "" ? [] : [secret])]) expect(body).not.toContain(s);
+  expect(body).not.toMatch(/\n\s+at /u);
+}
+function expectRefused(r: Res, status: number, code: string, c: Client = good) {
+  expect(r.status, r.body).toBe(status);
+  expect(r.json()).toMatchObject({ format: "duo.ui.error/1", ok: false, error: { code } });
+  expect(r.json()).not.toHaveProperty("data");
+  expect(r.headers["cache-control"]).toBe("no-store");
+  expect(r.headers["access-control-allow-origin"]).toBeUndefined();
+  noSecrets(r.body, c);
+}
+const forged = (c: Client) => c.cookie.replace(/=.*/u, "=forged");
+const sessionScenarios = ["foreign host", "wrong port", "missing session", "forged session"] as const;
+const originScenarios = ["absent", "foreign", "null"] as const;
+
+describe("Decision read request security (BE-API-10)", () => {
+  it.each(DECISION_ROUTES.flatMap((route) => sessionScenarios.map((s) => [route, s] as const)))("%s refuses %s and changes nothing", async (route, scenario) => {
+    const before = snapshot(good.root);
+    const lock = lockState(good.root);
+    const headers: Record<string, string> = { Cookie: good.cookie };
+    if (scenario === "foreign host") headers.Host = "evil.example";
+    if (scenario === "wrong port") headers.Host = "127.0.0.1:0";
+    if (scenario === "missing session") delete headers.Cookie;
+    if (scenario === "forged session") headers.Cookie = forged(good);
+    const host = scenario === "foreign host" || scenario === "wrong port";
+    expectRefused(await send(good, "GET", route, headers), host ? 403 : 401, host ? "UI_HOST_REJECTED" : "UI_SESSION_REQUIRED");
+    expect(snapshot(good.root)).toEqual(before);
+    expect(lockState(good.root)).toBe(lock);
+  });
+
+  it.each(DECISION_ROUTES.flatMap((route) => originScenarios.map((o) => [route, o] as const)))("%s with Origin %s is served like any authenticated GET, without CSRF and without CORS", async (route, origin) => {
+    const baseline = (await get(good, route)).json().data;
+    const headers: Record<string, string> = { Cookie: good.cookie, Host: "localhost:" + String(good.server.port) };
+    if (origin === "foreign") headers.Origin = "https://evil.example";
+    if (origin === "null") headers.Origin = "null";
+    const r = await send(good, "GET", route, headers);
+    expect(r.status, r.body).toBe(200);
+    expect(r.json().data).toEqual(baseline);
+    expect(r.headers["cache-control"]).toBe("no-store");
+    expect(r.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(r.headers["access-control-allow-credentials"]).toBeUndefined();
+    noSecrets(r.body, good);
+  });
+
+  it.each(["PUT", "DELETE", "PATCH"])("%s on a Decision route is refused for a foreign Origin or a missing CSRF token, and is not allowed with both", async (method) => {
+    const before = snapshot(good.root);
+    for (const route of DECISION_ROUTES) {
+      const base = { Cookie: good.cookie, "Content-Type": "application/json" };
+      expectRefused(await send(good, method, route, { ...base, Origin: "https://evil.example", "X-Duo-CSRF": good.csrf }, "{}"), 403, "UI_ORIGIN_REJECTED");
+      expectRefused(await send(good, method, route, { ...base, Origin: good.server.origin }, "{}"), 403, "UI_CSRF_REJECTED");
+      expectRefused(await send(good, method, route, { ...base, Origin: good.server.origin, "X-Duo-CSRF": good.csrf }, "{}"), 405, "UI_METHOD_NOT_ALLOWED");
+    }
+    expect(snapshot(good.root)).toEqual(before);
+  });
+
+  it("HEAD on a Decision route is not allowed and has no body", async () => {
+    for (const route of DECISION_ROUTES) {
+      const r = await send(good, "HEAD", route, { Cookie: good.cookie });
+      expect(r.status, route).toBe(405);
+      expect(r.body).toBe("");
+      expect(r.headers["cache-control"]).toBe("no-store");
+    }
+  });
+
+  it("IDs over 128 characters, NUL, newline, an encoded slash or backslash, double encoding and non-ASCII are refused; 128 characters is a lookup", async () => {
+    const longest = "D-" + "1".repeat(126);
+    expect((await get(good, "/api/decisions/" + longest)).json().data).toMatchObject({ status: "not-found", id: longest });
+    for (const id of ["D-" + "1".repeat(127), "D-" + "1".repeat(10_000), "D-001%00", "%00", "D-001%0A", "D-001%2F..%2F..%2Fproject.yaml", "D-001%5C..%5Cproject", "D-001%252F", "D%E2%80%91001"]) {
+      const r = await get(good, "/api/decisions/" + id);
+      expectRefused(r, 400, "UI_REQUEST_INVALID");
+      expect(r.body.length, id.slice(0, 20)).toBeLessThan(500);
+    }
+  });
+
+  it("list query parameters: unknown names (also __proto__ and constructor) and values over 200 characters are refused", async () => {
+    for (const q of ["?__proto__=x", "?constructor=x", "?state=confirmed&debug=1", "?q=" + "a".repeat(201)]) expectRefused(await get(good, "/api/decisions" + q), 400, "UI_REQUEST_INVALID");
+    const at = await get(good, "/api/decisions?q=" + "a".repeat(200));
+    expect(at.status).toBe(200);
+    expect(at.json().data.decisions).toEqual([]);
+  });
+
+  it("valid and hostile requests in parallel: valid answers stay identical, hostile ones are refused, Truth and the lock are untouched", async () => {
+    const before = snapshot(good.root);
+    const lock = lockState(good.root);
+    const routes = ["/api/decisions", "/api/decisions/D-001", "/api/decisions/D-002", "/api/decisions/D-003"];
+    const baseline = new Map(await Promise.all(routes.map(async (p) => [p, (await get(good, p)).json().data] as const)));
+    const json = { Cookie: good.cookie, "Content-Type": "application/json" };
+    const hostile: [() => Promise<Res>, number, string][] = [
+      [() => send(good, "GET", "/api/decisions", { Cookie: good.cookie, Host: "evil.example" }), 403, "UI_HOST_REJECTED"],
+      [() => send(good, "GET", "/api/decisions/D-002", { Cookie: forged(good) }), 401, "UI_SESSION_REQUIRED"],
+      [() => get(good, "/api/decisions/D-002%2F..%2Fx"), 400, "UI_REQUEST_INVALID"],
+      [() => get(good, "/api/decisions?sort=id"), 400, "UI_REQUEST_INVALID"],
+      [() => send(good, "DELETE", "/api/decisions/D-002", { ...json, Origin: "https://evil.example" }, "{}"), 403, "UI_ORIGIN_REJECTED"],
+      [() => send(good, "POST", "/api/proposals/P-001/confirm", { ...json, Origin: good.server.origin }, JSON.stringify({ confirmId: "P-001", previewDigest: "sha256:0" })), 403, "UI_CSRF_REJECTED"],
+    ];
+    const jobs: Promise<void>[] = [];
+    for (let round = 0; round < 5; round++) {
+      for (const p of routes) jobs.push(get(good, p).then((r) => { expect(r.status, p).toBe(200); expect(r.json().data).toEqual(baseline.get(p)); }));
+      for (const [call, status, code] of hostile) jobs.push(call().then((r) => expectRefused(r, status, code)));
+    }
+    await Promise.all(jobs);
+    expect(snapshot(good.root)).toEqual(before);
+    expect(lockState(good.root)).toBe(lock);
+    expect(git(good.root, "status", "--porcelain")).toBe("");
+  });
+
+  it("a UI confirm shows up in the Decision routes and a refused one does not; after a restart the old cookie no longer reads them", async () => {
+    const root = repo(PROJECT);
+    const service = createDecisionService({ root });
+    const p1 = await service.propose(agent, { title: "Use Postgres", question: "database", answer: "postgres" });
+    if (p1.value === undefined || (await service.confirm(human, p1.value.proposalId)).value === undefined) throw new Error("setup D-001");
+    const p2 = await service.propose(agent, { title: "Use SQLite", question: "database", answer: "sqlite", supersedes: "D-001" });
+    if (p2.value === undefined) throw new Error("setup P-002");
+    commit(root);
+    const c = await serve(root);
+    const ids = async (cl: Client) => ((await get(cl, "/api/decisions")).json().data.decisions as Summary[]).map((d) => d.id);
+    expect(await ids(c)).toEqual(["D-001"]);
+    const digest = ((await get(c, "/api/proposals/P-002/preview")).json().data as { preview: { digest: string } }).preview.digest;
+    const body = JSON.stringify({ confirmId: "P-002", previewDigest: digest });
+    const json = { Cookie: c.cookie, "Content-Type": "application/json", "X-Duo-CSRF": c.csrf };
+    const before = snapshot(root);
+    expectRefused(await send(c, "POST", "/api/proposals/P-002/confirm", { ...json, Origin: "https://evil.example" }, body), 403, "UI_ORIGIN_REJECTED", c);
+    expect(snapshot(root)).toEqual(before);
+    expect(await ids(c)).toEqual(["D-001"]);
+    const confirmed = await send(c, "POST", "/api/proposals/P-002/confirm", { ...json, Origin: c.server.origin }, body);
+    expect(confirmed.status, confirmed.body).toBe(200);
+    expect(confirmed.json().data).toMatchObject({ status: "confirmed" });
+    expect(await ids(c)).toEqual(["D-001", "D-002"]);
+    const d2 = (await get(c, "/api/decisions/D-002")).json().data as { decision: { lock: { status: string }; chain: unknown[] } };
+    expect(d2.decision.lock.status).toBe("valid");
+    expect(d2.decision.chain).toEqual([{ id: "D-001", state: "superseded", authority: "SUPERSEDED" }, { id: "D-002", state: "confirmed", authority: "CONFIRMED" }]);
+    await c.server.close();
+    servers.splice(servers.indexOf(c.server), 1);
+    const fresh = await serve(root, c.server.port);
+    for (const route of DECISION_ROUTES) {
+      expectRefused(await send(fresh, "GET", route, { Cookie: c.cookie }), 401, "UI_SESSION_REQUIRED", c);
+      expect((await get(fresh, route)).status, route).toBe(200);
+    }
   });
 });
