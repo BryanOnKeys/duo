@@ -34,7 +34,7 @@ The current verification path confirms the second cause by inspection: `verifyAg
 | Situation | Install verification | Doctor |
 |---|---|---|
 | Launcher and running CLI versions match | Existing checks determine success; no mismatch warning | Existing checks apply |
-| Known, non-empty versions differ | Add `launcher-version-mismatch`, CLI/server versions, resolved path and both safe next steps; warning alone preserves the existing result/exit code | Dedicated mismatch warning remains 40-4 follow-up |
+| Known, non-empty versions differ | Add `launcher-version-mismatch`, CLI/server versions, resolved path and both safe next steps; warning alone preserves the existing result/exit code | 40-4: a passing agent check becomes warning `version-mismatch` with the same facts and action `align-launcher`; failed checks stay errors; exit stays 0 |
 | Probe skipped/failed, or either version missing or `""` | No mismatch claim; existing failures stay failures | Existing failure/offline behavior |
 | Effective agent PATH contains no `duoctl` | Fail, never report `Verify: ok`; recommend reinstalling with `--launcher npx` | Existing unavailable-launcher error through shared verification |
 
@@ -119,8 +119,8 @@ No schema migration, new MCP tool, MCP tool schema change, Decision authority ch
 1. **40-1 (1 SP):** this note and deterministic resolution reproduction; BE-1 review before production implementation.
 2. **40-2 (2 SP):** implemented: recorded six real runner environments, stated coverage/gaps, shared effective-host policy and targeted no-launcher/lookup/probe tests.
 3. **40-3 (2 SP):** implemented: additive version-mismatch warning and en/ko CLI rendering; tests cover exact strings, missing/empty versions and existing failures. The warning itself does not change the result/exit code of the existing checks.
-4. **40-4 (2 SP):** doctor warning, facts and en/ko remediation.
-5. **40-5 (3 SP):** real subprocess regression with fake older server for Codex and Claude Code, explicit npx/custom launchers, missing agent-PATH launcher, removal, offline and missing/empty versions.
+4. **40-4 (2 SP):** implemented: doctor passes its runtime version to the shared verification and reports `version-mismatch` (warning, en/ko, action `align-launcher`). The remediation wording now names the resolved installation for every launcher kind instead of "the global DUO installation".
+5. **40-5 (3 SP):** implemented: real-subprocess doctor cases for Codex and Claude Code (older server warns with exit 0; a tool-list failure stays an exit 6 error despite the version difference; a matching version is verified) and removal with no launcher on the effective PATH. Explicit npx, `launch: false` (offline), failed probes and missing/empty versions were already pinned by the agent unit tests and the 40-3 install subprocess tests; they are not duplicated.
 
 A resolution-only test is not proof that the configured process reports the expected version. The subprocess and CLI checks above remain required before closing #40. Draft PRs target `next`; D1 and D2 are confirmed; the PR stays in draft until implementation and validation are complete. Publishing 0.3.4 is a separate maintainer decision.
 

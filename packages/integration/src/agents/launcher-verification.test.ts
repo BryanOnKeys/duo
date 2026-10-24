@@ -135,7 +135,7 @@ for (const adapter of [codexAdapter, claudeCodeAdapter]) {
         if (mismatch) {
           expect(result.warnings).toEqual([{
             code: "launcher-version-mismatch", cliVersion, serverVersion, resolved: path.join(f.global, f.exe),
-            nextActions: [`Update the global DUO installation to ${cliVersion}.`, `duoctl install ${adapter.id} --launcher npx`],
+            nextActions: [`Update the DUO installation at ${path.join(f.global, f.exe)} to ${cliVersion}.`, `duoctl install ${adapter.id} --launcher npx`],
           }]);
         } else expect(result.warnings).toBeUndefined();
       });
