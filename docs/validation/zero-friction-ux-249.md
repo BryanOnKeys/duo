@@ -8,8 +8,8 @@ Keep the following conclusions separate.
 
 | State | Rule | Current state |
 |---|---|---|
-| Plan adequate | The plan covers the #2 targets, the #3/#4/#5 dependencies, fixture conditions, evidence collection, and Jira's completion route. | Yes; this document is the reviewed plan. |
-| Local deliverable ready | This document, its runnable script, one raw trace containing three cases, and documented checks exist and can be inspected. | Yes: the embedded script replay and checks in section 9 passed. |
+| Plan adequate | The plan covers the #2 targets, the #3/#4/#5 dependencies, fixture conditions, evidence collection, and Jira's completion route. | Draft, pending maintainer review of the requested corrections. |
+| Local deliverable ready | This document, its runnable script, one raw trace containing three cases, and documented checks exist. The raw trace is available only in the local workspace; reviewers can reproduce its checks from section 5. | Yes: the embedded script replay and checks in section 9 passed. |
 | Jira 249 complete | The Jira DoD is satisfied through an approved submission route. | No. No Jira comment, PR, approval, merge, or cross-platform verification has been submitted from this task. |
 
 Jira 249's current DoD permits either a linked PR approved by a non-author and merged after Windows, Ubuntu, and macOS verification, or a research result recorded on the Jira issue. This document prepares the research result; posting it requires separate authorization.
@@ -159,9 +159,9 @@ The trace stores complete stdout/stderr packets, exact arguments and init stdin,
 
 ## 6. 2026-10-23 execution record
 
-Build identity: workspace HEAD `8a7715cc0580fd5a64631b36b923779a69b9f047`; Node `v24.18.0`; pnpm `11.25.0`; Vitest `5.0.2`; Windows PowerShell. The measured build had no related tracked or untracked source changes. The workspace had this untracked target document and unrelated Java target outputs; they were not used by any fixture. `pnpm build` completed with exit 0 before the replay.
+Build identity: the measurement ran on the #80 branch `codex/ui-a11y-73`, checked out at HEAD `8a7715cc0580fd5a64631b36b923779a69b9f047`, based on `next` SHA `0521fd77c0681988a09a27f0ea826d983bb52563`. The measured application source matched tested-code SHA `73ec8ecb6d0d5568f65cb1148e97d92cbc7da01d`; the later HEAD differs only by the #80 audit report, so it introduced no related application-source changes. Environment: Node `v24.18.0`; pnpm `11.25.0`; Vitest `5.0.2`; Windows PowerShell. At measurement time, this document was an untracked local draft and unrelated Java target outputs were present; neither was used by the fixtures. `pnpm build` completed with exit 0 before the replay.
 
-Raw evidence is outside the repository at `C:\Users\SSAFY\Documents\duo-evidence\jira-249-20261023-final-p3\replay-2026-10-23T12-20-13-504Z-17620-ac389605-93db-4734-aa2b-973de26e6944.json` (SHA-256 `ec2511474675995acd76d6515cace559fa7aca0b4ade94b087cbb82c6397397c`). It passed all eight assertions and records embedded-script SHA-256 `64bffae41ddb4acd3d8f4b7cd5754b93dcb610625c64b20eabf3a623884da1a6`. Two consecutive missing-checkout runs in the same `jira-249-20261023-no-overwrite` directory both exited 1 and produced two distinct failure traces, confirming that reruns preserve earlier evidence. Fixture paths are disposable local paths. The earlier exploratory trace is retained separately at `C:\Users\SSAFY\Documents\duo-evidence\jira-249-20261023\replay-20261023.json`.
+The raw trace is retained outside the repository at `<evidence-root>/jira-249-20261023-final-p3/replay-2026-10-23T12-20-13-504Z-17620-ac389605-93db-4734-aa2b-973de26e6944.json` (SHA-256 `ec2511474675995acd76d6515cace559fa7aca0b4ade94b087cbb82c6397397c`). Reviewers cannot access that local trace; they can reproduce its checks by saving the JavaScript code block in section 5 as `replay.mjs`, running `pnpm build` and then `node .\replay.mjs` from the repository root. The embedded script SHA-256 is `64bffae41ddb4acd3d8f4b7cd5754b93dcb610625c64b20eabf3a623884da1a6`; a successful replay must report eight passing assertions. The recorded trace SHA-256 identifies the original run. Reruns use a unique timestamp, process ID, UUID, and disposable fixture paths, so their trace SHA-256 will differ; the embedded-script SHA-256 remains stable when the code block is unchanged. Two consecutive missing-checkout runs both exited 1 and produced distinct failure traces. The earlier exploratory trace is retained separately under `<evidence-root>/jira-249-20261023/`.
 
 | Case | Fixed expectation before execution | Actual observation | Result |
 |---|---|---|---|
@@ -206,15 +206,17 @@ git diff --check
 explicit trailing-whitespace scan of docs/validation/zero-friction-ux-249.md
 ```
 
-For this execution after the final document edit:
+Validation results from the original execution before the review corrections:
 
 | Command | Exit status | Result |
 |---|---:|---|
 | `pnpm docs:validate` | 0 | 152 files, 52 requirements, 14 decisions, 22 issues, 5 milestones, 94 acceptance criteria, and 226 links validated. |
 | `git diff --check` | 0 | No whitespace errors in tracked diff. |
-| Explicit trailing-whitespace scan of this untracked document | 0 | No trailing whitespace. |
+| Explicit trailing-whitespace scan of the document | 0 | No trailing whitespace. |
 | `pnpm vitest run packages/director/src/review/record.e2e.test.ts -t "R-DRIFT"` | 0 | 4 passed, 9 skipped. |
 | `pnpm vitest run tests/mcp/mcp.e2e.test.ts -t "same MCP process sees a stale index"` | 0 | 1 passed, 19 skipped. |
 | `pnpm vitest run tests/cli/review-evidence-line.e2e.test.ts` | 0 | 1 passed. |
 
 The embedded replay exited 0 with all eight assertions passing. The evidence file's SHA-256 and embedded script SHA-256 are recorded in the handoff. A Jira comment, PR, approval, merge, or status transition is intentionally absent from this local record.
+
+After the review corrections in this document, `pnpm docs:validate` passed with 153 files, 52 requirements, 14 decisions, 22 issues, 5 milestones, 94 acceptance criteria, and 226 links. `git diff --check` and the trailing-whitespace scan also passed.
