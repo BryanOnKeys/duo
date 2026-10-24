@@ -187,7 +187,7 @@ Next
 - 종료 코드: error check가 없으면 0, 있으면 6(`ACTION_REQUIRED`), doctor 자체의 예기치 않은 실패는 1. 연결하지 않은 Agent, `llm.provider: none`, stale index(warning)는 0이다.
 - Index: stale은 warning(context·review가 `index-required`를 반환), missing·incompatible은 error. 셋 다 다음 행동은 `duoctl index`. index 검사(`inspectIndex`)는 한 번이고 분석 수준은 그 결과의 coverage다(index가 missing이어도 보인다).
 - 작업 트리 변경은 오류가 아니다. adoption 전이면 init이 `--baseline-policy head|abort`를 묻는다고, adoption 뒤면 review가 HEAD와 비교한다고 설명한다. 첫 commit이 없으면 commit 다음에 init을 안내한다.
-- Agent: 연결하지 않은 Agent는 `info`이고, 둘 다 연결하지 않았으면 다음 행동 하나에 두 명령을 함께 보인다(기본 추천 없음). 연결된 Agent는 install verify와 같은 방식으로 설정 parse, 계획한 항목, bridge 블록, launcher를 확인하고 설정의 command로 MCP 서버를 띄워 initialize → tools/list까지 확인한 뒤 닫는다(`duo_get_status`는 부르지 않음). 기대 tool은 이 build의 `MCP_TOOLS` 이름 목록이다. drifted는 warning(`duoctl install <agent>`, npx launcher면 `--launcher npx`), conflict·launcher 없음·launch 실패·tool 불일치는 error다. Codex trust와 Claude Code 승인은 DUO가 확인할 수 없으므로 안내만 한다.
+- Agent: 연결하지 않은 Agent는 `info`이고, 둘 다 연결하지 않았으면 다음 행동 하나에 두 명령을 함께 보인다(기본 추천 없음). 연결된 Agent는 install verify와 같은 방식으로 설정 parse, 계획한 항목, bridge 블록, launcher를 확인하고 설정의 command로 MCP 서버를 띄워 initialize → tools/list까지 확인한 뒤 닫는다(`duo_get_status`는 부르지 않음). 기대 tool은 이 build의 `MCP_TOOLS` 이름 목록이다. drifted는 warning(`duoctl install <agent>`, npx launcher면 `--launcher npx`), conflict·launcher 없음·launch 실패·tool 불일치는 error다. 모든 검사를 통과했지만 실행 중인 duoctl과 시작된 MCP 서버의 버전이 알려진 비어 있지 않은 문자열로 서로 다르면 warning `version-mismatch`다(#40-4). facts에 `cliVersion`, `serverVersion`, `resolved`가 더해지고 행동 `align-launcher`는 `resolved` 위치의 DUO 업데이트 또는 `duoctl install <agent> --launcher npx`를 안내한다. 이 경고는 기존 error를 가리지 않고 종료 코드를 바꾸지 않는다(0). Codex trust와 Claude Code 승인은 DUO가 확인할 수 없으므로 안내만 한다.
 - LLM: `none`은 정상(info)이고 key 안내를 하지 않는다. provider를 설정했을 때만 설정과 credential 환경 변수의 존재를 본다(`configured` 또는 warning: `credential-missing`, `model-missing`, `base-url-unsupported`, `base-url-env`, `custom-headers-env`). 값, 환경 변수 목록, provider 호출은 없다. LLM 행동은 다음 행동 목록에 넣지 않는다.
 - 다음 행동: error·warning check의 행동을 check 순서(Git → Truth → baseline → index → Agent)로 모으고, init이 있으면 index를 뺀다(init이 index한다). 최대 3개.
 - Secret: facts와 params의 모든 문자열(Agent 설정 파일의 parse 오류, MCP 서버 stderr 마지막 두 줄 포함)은 Context와 같은 `redactSecrets`를 거친다.
@@ -308,3 +308,7 @@ DUO 실행 파일 설치, 저장소 초기화, Agent 연결은 서로 다른 단
 | global 설치 | package 70개, 약 83.8 MB(대부분 `typescript`, `gpt-tokenizer`) | package 70개, 약 93.6 MB; T12B: 71개, 약 113.5 MB(`openai` 7.23.0 약 20 MB, tarball 1,250,899 B) |
 
 0.2.1(H-65): tarball 24,333,166 B, unpacked 114,025,940 B, 7,468 files(bundled `node_modules/` 67 package, 7,443 files). global 설치의 디스크 사용량은 0.2.0과 거의 같다(Windows, npm 11: 0.2.0 registry 설치 7,481 files 113,917,442 B, bundled 방식 7,479 files 113,876,352 B). 다운로드만 커진다.
+
+### Launcher 검증 보정 (#40-2/40-3, 미출시)
+
+측정한 runner 환경의 기본 `path` launcher는 주입된 `node_modules/.bin`을 제외한 같은 PATH로 plan·lookup·MCP probe를 수행한다. launcher가 없으면 성공으로 표시하지 않고 `--launcher npx`를 안내한다(plan 차단은 exit 6, 적용 후 verify 실패는 exit 1). 실행 CLI와 MCP 서버 버전이 알려진 비어 있지 않은 문자열로 서로 다르면 JSON의 선택적 `verify.warnings`에 `launcher-version-mismatch`, 두 버전, 해석된 경로, 두 해결 방법을 추가하고 사람이 읽는 en/ko 출력에도 표시한다. 경고만으로 기존 성공/종료 코드를 바꾸지 않으며 기존 MCP 실패를 가리지 않는다. 빈 버전은 unknown이고 정확한 문자열만 비교한다. 지원 runner와 pnpm dlx 등 남은 범위는 [설계 및 실측 기록](roadmap/issue-40-launcher-verification-design.md)을 따른다.

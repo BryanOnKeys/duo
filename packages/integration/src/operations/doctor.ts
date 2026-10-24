@@ -41,7 +41,7 @@ export type DoctorGroup = "runtime" | "git" | "truth" | "index" | "analysis" | "
 
 export type DoctorActionId =
   | "install-node" | "install-git" | "git-init" | "git-first-commit" | "use-top-level" | "init" | "init-repair" | "fix-truth" | "index"
-  | "install-agent" | "connect-agent" | "fix-agent-config" | "fix-launcher" | "set-llm-credential" | "fix-llm-config";
+  | "install-agent" | "connect-agent" | "fix-agent-config" | "fix-launcher" | "align-launcher" | "set-llm-credential" | "fix-llm-config";
 
 /** One next step. commands: the exact commands to run (empty for a manual step); params: values the wording needs. */
 export interface DoctorAction {
@@ -258,11 +258,18 @@ export async function projectDoctor(rootArg: string, options: DoctorOptions): Pr
     }
     const adapter = agentAdapter(agent);
     const humanStep = adapter.projectTrustRequired ? "codex-trust" : adapter.approvalRequired ? "claude-approval" : undefined;
-    const verify = await verifyAgentIntegration(root, agent, { host, callStatus: false, ...(options.launchTimeoutMs === undefined ? {} : { timeoutMs: options.launchTimeoutMs }) });
+    const verify = await verifyAgentIntegration(root, agent, { host, callStatus: false, cliVersion: rt.duoctl, ...(options.launchTimeoutMs === undefined ? {} : { timeoutMs: options.launchTimeoutMs }) });
     const shown = launcherDisplay({ kind: verify.launcher.kind, command: verify.launcher.command, argsPrefix: verify.launcher.argsPrefix });
     const base = { targets, launcher: shown, ...(verify.launcher.version === undefined ? {} : { version: verify.launcher.version }) };
     if (verify.ok) {
-      set(id, "ok", "verified", { ...base, tools: verify.server?.tools.length ?? 0, ...(humanStep === undefined ? {} : { humanStep }) });
+      const verified = { ...base, tools: verify.server?.tools.length ?? 0, ...(humanStep === undefined ? {} : { humanStep }) };
+      // #40-4 (D2): a version difference is a warning only when every check passed; failures below stay errors.
+      const mismatch = verify.warnings?.find((w) => w.code === "launcher-version-mismatch");
+      if (mismatch === undefined) set(id, "ok", "verified", verified);
+      else {
+        set(id, "warning", "version-mismatch", { ...verified, cliVersion: mismatch.cliVersion, serverVersion: mismatch.serverVersion, resolved: mismatch.resolved },
+          [{ id: "align-launcher", commands: [command("install", agent, "--launcher", "npx")], params: { agent, cliVersion: mismatch.cliVersion, resolved: mismatch.resolved } }]);
+      }
       return;
     }
     const failed = (name: string) => verify.checks.find((c) => c.name === name && !c.ok);

@@ -20,6 +20,7 @@ DUO는 SDD(Specification-Driven Development)로 개발한다. 구현은 이 문�
 | [11-testing-strategy.md](11-testing-strategy.md) | 테스트 계층, fixture, 필수 검증, E2E |
 | [12-roadmap.md](12-roadmap.md) | Milestone(M0~M4)과 MVP 이후 |
 | [language-support.md](language-support.md) | Analysis Level(L0~L3), AnalyzerCapabilities, 언어별 지원·한계, stack·build output 판별, grammar (T18.0) |
+| [roadmap/issue-40-launcher-verification-design.md](roadmap/issue-40-launcher-verification-design.md) | Issue #40-1~3 draft: settled D1/D2 policy, measured runner evidence, effective PATH and version warning, compatibility and remaining validation |
 | [performance-benchmark.md](performance-benchmark.md) | TASK-019 benchmark 방법, 기준 환경, index·Context·Review·MCP·UI 측정, C145 원인, 적용한 최적화, T23 real-world baseline(고정 SHA 5개 저장소, A/B 비교, 3 OS 수동 workflow) |
 | [benchmarks/decision-compliance-01.md](benchmarks/decision-compliance-01.md) | Decision Compliance Benchmark 1 (Legacy + New Violation, T31, H-64): 고정 TypeScript fixture에서 published DUO 0.2.0, 한 규칙용 DIY gate, Codex review를 축별로 비교(종합 점수 없음), raw evidence, 재현 방법, 한계, 반증 기준. performance benchmark와 별개 |
 | [benchmarks/decision-compliance-02.md](benchmarks/decision-compliance-02.md) | Decision Compliance Benchmark 2 (Adoption Provenance + Supersession, T32, H-64): adoption 뒤 debt(diff base ≠ adoption)와 D-001 → D-002 supersede timeline에서 published DUO 0.2.0, DIY-0/1/2, Codex + 문서를 축별 비교, 반증 결과, product-thesis checkpoint(C) |
@@ -30,6 +31,7 @@ DUO는 SDD(Specification-Driven Development)로 개발한다. 구현은 이 문�
 | [release/checklist.md](release/checklist.md) | release 명령, version별 release 기록(0.2.2, 0.2.1, 0.2.0, 0.1.2, 0.1.1, 0.1.0: 준비 항목과 최종 상태), publish 순서, limitation |
 | [release/notes-0.1.1.md](release/notes-0.1.1.md) | 0.1.1 release notes |
 | [release/notes-0.1.2.md](release/notes-0.1.2.md) | 0.1.2 release notes |
+| [release/notes-unreleased.md](release/notes-unreleased.md) | 미출시 #40-1~3 launcher 검증 변경·호환성·지원 범위. 0.3.4 출시는 별도 승인 |
 | [release/notes-0.3.3.md](release/notes-0.3.3.md) | 0.3.3 stable patch release notes(H-87, dist-tag latest): 검사하지 않는 constraint 표시(#14, constraint 검사 추가 없음), MCP 시작 지연 적재와 bridge 재확인 안내(#8, 측정 조건·실제 Codex NOT TESTED), init answers 오류(#15), review의 정확한 위반 줄(#16), Codex trust·Claude Code 승인 안내(#3a), 변하지 않은 것, 업그레이드·되돌리기, 알려진 한계 |
 | [release/notes-0.3.2.md](release/notes-0.3.2.md) | 0.3.2 stable patch release notes(H-84, H-85, H-86, dist-tag latest): `install remove`가 DUO가 만든 MCP 설정 파일을 지움(#6), Agent bridge의 tool 탐색·CLI fallback 안내(#8, 기존 설치는 install 재실행), 변하지 않은 것, 업그레이드·되돌리기, 알려진 한계(#7, C259·C260 등) |
 | [release/notes-0.3.1.md](release/notes-0.3.1.md) | 0.3.1 stable correctness patch release notes(H-82, H-83, dist-tag latest): Decision authority integrity(C261~C263), review snapshot(C264), review 분석 완결성(C265), 업그레이드·되돌리기, 알려진 한계, machine contract |

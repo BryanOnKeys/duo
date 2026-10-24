@@ -1,6 +1,6 @@
 /** Bounded work map over DUO's existing graph. The JSON is a projection, never source truth. */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Background, BackgroundVariant, BaseEdge, Controls, getBezierPath, MiniMap, Position, ReactFlow, useInternalNode,
+import { Background, BackgroundVariant, BaseEdge, Controls, getBezierPath, MiniMap, Position, ReactFlow, useInternalNode, useReactFlow,
   type Edge, type EdgeProps, type Node } from "@xyflow/react";
 import { api, q } from "../api.js";
 import { Empty, ErrorBox, Loading, Page, type Load } from "../components.js";
@@ -59,6 +59,26 @@ function FloatingEdge({ id, source, target, sourceX, sourceY, targetX, targetY, 
 }
 
 const edgeTypes = { floating: FloatingEdge };
+
+function SyncSelectedNodes({ ids }: { readonly ids: readonly string[] }) {
+  const flow = useReactFlow();
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+  useEffect(() => {
+    flowRef.current.setNodes((nodes) => {
+      let changed = false;
+      const selected = new Set(ids);
+      const next = nodes.map((node) => {
+        const isSelected = selected.has(node.id);
+        if (node.selected === isSelected && node.domAttributes?.["aria-pressed"] === isSelected) return node;
+        changed = true;
+        return { ...node, selected: isSelected, domAttributes: { ...node.domAttributes, "aria-pressed": isSelected } };
+      });
+      return changed ? next : nodes;
+    });
+  }, [ids]);
+  return null;
+}
 
 function nodeKind(n: WorkNode): "task" | "document" | "test" | "file" | "symbol" | "worktree" | "other" {
   if (n.type === "task" || n.type === "worktree" || n.type === "symbol") return n.type;
@@ -141,6 +161,7 @@ function placement(nodes: readonly WorkNode[], edges: readonly WorkEdge[], selec
     return {
       id: n.id, position: savedPositions.get(n.id) ?? positions.get(n.id) ?? { x: 32, y: nextY }, draggable: true, selectable: true,
       className: `work-node work-node--${kind}${active ? " work-node--focus" : ""}${muted ? " work-node--muted" : ""}`,
+      ariaRole: "button", domAttributes: { "aria-pressed": false },
       style: { width: n.type === "task" ? 270 : 248 },
       data: { label: <div className="work-node-body" title={n.label}>
         <div className="work-node-top"><span className="work-node-dot" /><span>{kind === "task" ? "AGENT WORK" : kind.toUpperCase()}</span>{active ? <span className="work-node-live">CURRENT</span> : null}</div>
@@ -153,7 +174,9 @@ function placement(nodes: readonly WorkNode[], edges: readonly WorkEdge[], selec
 
 export function WorkPage() {
   const [selectedTask, setSelectedTask] = useState<string | undefined>();
-  const [selectedNode, setSelectedNode] = useState<string | undefined>();
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectionTouched, setSelectionTouched] = useState(false);
+  const lastActivatedNode = useRef<string | undefined>(undefined);
   const draggedPositions = useRef(new Map<string, { x: number; y: number }>());
   const viewport = useRef<{ x: number; y: number; zoom: number } | undefined>(undefined);
   const [agent, setAgent] = useState("Codex");
@@ -236,6 +259,46 @@ export function WorkPage() {
   const visibleNodes = useMemo(() => [...new Map([...(map?.nodes ?? []), ...expanded.nodes].map((n) => [n.id, n])).values()], [map, expanded]);
   const visibleEdges = useMemo(() => [...new Map([...(map?.edges ?? []), ...expanded.edges].map((e) => [`${e.from}:${e.type}:${e.to}`, e])).values()], [map, expanded]);
   const layout = useMemo(() => placement(visibleNodes, visibleEdges, selected, draggedPositions.current), [visibleNodes, visibleEdges, selected]);
+  const preferredNodeId = lastActivatedNode.current;
+  const selectedNodeId = preferredNodeId !== undefined && selectedNodeIds.includes(preferredNodeId)
+    ? preferredNodeId
+    : [...selectedNodeIds].sort((a, b) => a.localeCompare(b))[0];
+  const detail = visibleNodes.find((node) => node.id === selectedNodeId) ??
+    (selectionTouched ? undefined : visibleNodes.find((node) => node.id === `task:${selected}`));
+  const connections = detail === undefined ? [] : visibleEdges.filter((e) => e.from === detail.id || e.to === detail.id);
+  const taskCount = visibleNodes.filter((n) => n.type === "task").length;
+  const contextCount = visibleNodes.filter((n) => n.type !== "task" && n.type !== "worktree").length;
+  const updateNodeSelection = (ids: string[]) => {
+    const normalized = [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+    setSelectedNodeIds((current) => current.length === normalized.length && current.every((id) => normalized.includes(id)) ? current : normalized);
+  };
+  const selectNode = (id: string, extend = false) => {
+    const node = visibleNodes.find((candidate) => candidate.id === id);
+    if (node === undefined) return;
+    const removing = extend && selectedNodeIds.includes(id);
+    const nextIds = extend ? removing ? selectedNodeIds.filter((selectedId) => selectedId !== id) : [...selectedNodeIds, id] : [id];
+    lastActivatedNode.current = removing ? undefined : id;
+    setSelectionTouched(true);
+    updateNodeSelection(nextIds);
+    if (node.type === "task" && !removing) {
+      viewport.current = undefined;
+      setSelectedTask(id.slice(5));
+      setExpanded({ nodes: [], edges: [], truncated: false });
+    }
+  };
+  const clearNodeSelection = () => {
+    lastActivatedNode.current = undefined;
+    setSelectionTouched(true);
+    updateNodeSelection([]);
+  };
+  useEffect(() => {
+    const available = new Set(visibleNodes.map((node) => node.id));
+    const nextIds = selectedNodeIds.filter((id) => available.has(id));
+    if (nextIds.length !== selectedNodeIds.length) {
+      setSelectedNodeIds(nextIds);
+      if (!nextIds.includes(lastActivatedNode.current ?? "")) lastActivatedNode.current = undefined;
+    }
+  }, [visibleNodes, selectedNodeIds]);
   const focusPosition = layout.nodes.find((node) => node.id === `task:${selected}`)?.position;
   const initialViewport = viewport.current ?? { x: 90 - (focusPosition?.x ?? 32) * 0.7,
     y: 180 - (focusPosition?.y ?? 32) * 0.7, zoom: 0.7 };
@@ -248,18 +311,13 @@ export function WorkPage() {
     style: { stroke: tree ? "#777ce5" : "#a6b4c4", strokeWidth: tree ? 2 : 1.25,
       strokeDasharray: tree ? (e.source === "context" ? "5 4" : undefined) : "4 5", opacity: tree ? 0.82 : 0.3 },
   }); }), [visibleEdges, layout]);
-  const detail = visibleNodes.find((n) => n.id === selectedNode) ?? visibleNodes.find((n) => n.id === `task:${selected}`);
-  const connections = detail === undefined ? [] : visibleEdges.filter((e) => e.from === detail.id || e.to === detail.id);
-  const taskCount = visibleNodes.filter((n) => n.type === "task").length;
-  const contextCount = visibleNodes.filter((n) => n.type !== "task" && n.type !== "worktree").length;
-
   async function add(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!name.trim()) return;
     setSaving(true); setSaveError(undefined);
     try {
       const result = await api.post<{ task: Task }>("/api/work-tasks", { agent: agent.trim(), name: name.trim(), ...(issueId.trim() ? { issueId: issueId.trim() } : {}) });
-      setName(""); setIssueId(""); viewport.current = undefined; setSelectedTask(result.data.task.id); reload();
+      setName(""); setIssueId(""); viewport.current = undefined; setSelectedTask(result.data.task.id);
     } catch (error) { setSaveError(error instanceof Error ? error.message : String(error)); }
     finally { setSaving(false); }
   }
@@ -286,17 +344,23 @@ export function WorkPage() {
             <div className="work-graph-head"><div><strong>Relationship map</strong><p>Selected work is the tree root. Drag nodes to arrange the map.</p></div>
               <div className="work-legend"><span className="work-legend-task">Work</span><span className="work-legend-document">Document</span><span className="work-legend-file">Code</span><span className="work-legend-test">Test</span></div>
             </div>
-            <div className="work-canvas" role="img" aria-label="Work and DUO relationship graph">
+            <div className="work-canvas" role="region" aria-label="Work and DUO relationship graph"
+              onKeyDownCapture={(event) => {
+                const target = event.target;
+                const node = target instanceof Element ? target.closest<HTMLElement>(".react-flow__node") : null;
+                if (node?.dataset.id === undefined || (event.key !== "Enter" && event.key !== " ")) return;
+                event.preventDefault();
+                selectNode(node.dataset.id, event.shiftKey || event.ctrlKey || event.metaKey);
+              }}>
             <ReactFlow key={graphKey} defaultNodes={layout.nodes} defaultEdges={edges} edgeTypes={edgeTypes}
               fitView={visibleNodes.length <= 12} defaultViewport={initialViewport}
               fitViewOptions={{ padding: 0.16, maxZoom: 0.9 }} minZoom={0.08} maxZoom={1.5} nodesConnectable={false}
               zoomOnScroll={false} preventScrolling={false}
               onMoveEnd={(_event, next) => { viewport.current = next; }}
               onNodeDragStop={(_event, node) => { draggedPositions.current.set(node.id, node.position); }}
-              onNodeClick={(_event, node) => {
-                setSelectedNode(node.id);
-                if (node.id.startsWith("task:")) { viewport.current = undefined; setSelectedTask(node.id.slice(5)); setExpanded({ nodes: [], edges: [], truncated: false }); }
-              }}>
+              onNodeClick={(event, node) => selectNode(node.id, event.shiftKey || event.ctrlKey || event.metaKey)}
+              onPaneClick={clearNodeSelection}>
+              <SyncSelectedNodes ids={selectedNodeIds} />
               <Background variant={BackgroundVariant.Dots} gap={24} size={1} /><Controls showInteractive={false} />
               <MiniMap position="bottom-right" style={{ width: 190, height: 132 }} pannable zoomable
                 nodeColor={(n) => n.className?.includes("work-node--focus") ? "#5d63de"
@@ -323,8 +387,7 @@ export function WorkPage() {
                 const other = visibleNodes.find((n) => n.id === (e.from === detail.id ? e.to : e.from));
                 return <li key={i}><button className="work-connection" type="button" onClick={() => {
                   if (other === undefined) return;
-                  setSelectedNode(other.id);
-                  if (other.type === "task") { setSelectedTask(other.id.slice(5)); setExpanded({ nodes: [], edges: [], truncated: false }); }
+                  selectNode(other.id);
                 }}><span>{e.type}</span><strong>{other?.label ?? "Unknown node"}</strong></button></li>;
               })}</ul>
               {detail.type === "task" ? null : <div className="actions">
@@ -353,7 +416,10 @@ export function WorkPage() {
               </div>}
               {detail.type !== "task" ? null : <button className="secondary" type="button" onClick={() => {
                 const id = detail.id.slice(5);
-                void api.post("/api/work-task-complete", { id }).then(() => { setSelectedNode(undefined); setSelectedTask(undefined); reload(); });
+                void api.post("/api/work-task-complete", { id }).then(() => {
+                  clearNodeSelection();
+                  if (selectedTask === undefined) reload(); else setSelectedTask(undefined);
+                });
               }}>Mark completed</button>}
             </>}
           </aside>

@@ -117,11 +117,21 @@ export interface VerifyCheck {
   readonly detail?: string;
 }
 
+export interface LauncherVersionMismatchWarning {
+  readonly code: "launcher-version-mismatch";
+  readonly cliVersion: string;
+  readonly serverVersion: string;
+  readonly resolved: string;
+  readonly nextActions: readonly string[];
+}
+
 export interface AgentIntegrationVerification {
   readonly format: "duo.agent-integration-verify/1";
   readonly agent: AgentId;
   readonly ok: boolean;
   readonly checks: readonly VerifyCheck[];
+  /** Additive facts only: warnings never override a failing check. */
+  readonly warnings?: readonly LauncherVersionMismatchWarning[];
   /** Launcher provenance: what the configuration starts on this machine, and the version that answered. */
   readonly launcher: {
     readonly kind: DuoLauncher["kind"];

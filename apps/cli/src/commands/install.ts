@@ -17,6 +17,7 @@ import {
 import { createDiagnostic } from "@duo-director/core";
 import { t } from "../messages.js";
 import { EXIT, failed, type Outcome } from "../output.js";
+import { VERSION } from "../version.js";
 import { diagLines, interactive, usage, type Env } from "./shared.js";
 
 export interface InstallOptions {
@@ -48,6 +49,7 @@ function renderVerify(env: Env, v: AgentIntegrationVerification): string[] {
     t(L, "install.verify", { result: v.ok ? "ok" : "failed" }),
     t(L, "install.launcher", { command: [v.launcher.command, ...v.launcher.argsPrefix].join(" "), state: [v.launcher.resolved, v.launcher.localBin, v.launcher.version === undefined ? undefined : `duoctl ${v.launcher.version}`].filter((x) => x !== undefined).join(" · ") || "not found" }),
     ...v.checks.map((c) => t(L, "install.check", { mark: c.ok ? "✓" : "✗", name: c.name, detail: c.detail === undefined ? "" : ` · ${c.detail}` })),
+    ...(v.warnings ?? []).map((w) => t(L, "install.version-mismatch", { cliVersion: w.cliVersion, serverVersion: w.serverVersion, resolved: w.resolved, agent: v.agent })),
     ...v.nextActions.map((a) => t(L, "install.next", { action: a })),
   ];
 }
@@ -105,7 +107,7 @@ export async function installCommand(env: Env, sub: string | undefined, arg: str
   const step = await confirmAndApply(env, "install", plan, human);
   if (step.outcome !== undefined) return step.outcome;
   if (plan.noop) human.push(t(env.locale, "install.unchanged"));
-  const verify = await verifyAgentIntegration(env.root, agent, { host: host(env) });
+  const verify = await verifyAgentIntegration(env.root, agent, { host: host(env), cliVersion: VERSION });
   human.push(...renderVerify(env, verify));
   const status = !verify.ok ? "verify-failed" : plan.noop ? "unchanged" : "installed";
   return {

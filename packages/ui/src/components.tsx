@@ -61,6 +61,10 @@ export function Section(props: { readonly title: string; readonly children: Reac
   );
 }
 
+export function TableScroll(props: { readonly label: string; readonly children: ReactNode }) {
+  return <div className="table-scroll" role="region" aria-label={props.label} tabIndex={0}>{props.children}</div>;
+}
+
 export function Empty(props: { readonly children: ReactNode }) {
   return <p className="empty">{props.children}</p>;
 }
