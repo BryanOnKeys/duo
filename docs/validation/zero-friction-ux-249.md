@@ -10,7 +10,7 @@ Keep the following conclusions separate.
 |---|---|---|
 | Plan adequate | The plan covers the #2 targets, the #3/#4/#5 dependencies, fixture conditions, evidence collection, and Jira's completion route. | Draft, pending maintainer review of the requested corrections. |
 | Local deliverable ready | This document, its runnable script, one raw trace containing three cases, and documented checks exist. The raw trace is available only in the local workspace; reviewers can reproduce its checks from section 5. | Yes: the embedded script replay and checks in section 9 passed. |
-| Jira 249 complete | The Jira DoD is satisfied through an approved submission route. | No. No Jira comment, PR, approval, merge, or cross-platform verification has been submitted from this task. |
+| Jira 249 complete | The Jira DoD is satisfied through an approved submission route. | No. Draft PR #82 is open; this document records no Jira research comment, non-author approval, merge, or three-OS verification. |
 
 Jira 249's current DoD permits either a linked PR approved by a non-author and merged after Windows, Ubuntu, and macOS verification, or a research result recorded on the Jira issue. This document prepares the research result; posting it requires separate authorization.
 
@@ -217,6 +217,6 @@ Validation results from the original execution before the review corrections:
 | `pnpm vitest run tests/mcp/mcp.e2e.test.ts -t "same MCP process sees a stale index"` | 0 | 1 passed, 19 skipped. |
 | `pnpm vitest run tests/cli/review-evidence-line.e2e.test.ts` | 0 | 1 passed. |
 
-The embedded replay exited 0 with all eight assertions passing. The evidence file's SHA-256 and embedded script SHA-256 are recorded in the handoff. A Jira comment, PR, approval, merge, or status transition is intentionally absent from this local record.
+The embedded replay exited 0 with all eight assertions passing. The evidence file's SHA-256 and embedded script SHA-256 are recorded in the handoff. Draft PR #82 is open. This local execution record does not include a Jira research comment, non-author approval, merge, three-OS verification, or Jira status transition.
 
 After the review corrections in this document, `pnpm docs:validate` passed with 153 files, 52 requirements, 14 decisions, 22 issues, 5 milestones, 94 acceptance criteria, and 226 links. `git diff --check` and the trailing-whitespace scan also passed.
