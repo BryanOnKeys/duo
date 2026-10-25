@@ -28,6 +28,11 @@ Stable security patch on branch `main`(H-93): 번들 MCP SDK(client·server·cor
 - [x] upgrade 0.3.3 → 0.3.4, 0.2.0 → 0.3.4(T135, ts·python·cpp·sparse: Truth 불변, re-init 없음)
 - [x] security: artifact `release:audit` 0, workspace `pnpm audit --prod` 0. dev-only vitest 계열 advisory는 #91(package에 없음)
 - [x] H-93 기록(target `76247bf`)
+- [x] `release:authorization` OK(H-93, record HEAD `3b3c9af`, 후보 뒤 변경은 `docs/`만). 그 commit의 `main` CI(run 40163424251) 3 OS success 뒤 publish
+- [x] npm publish `@duo-director/cli@0.3.4` `--tag latest --access public`(검증한 tarball 그대로, 사람의 2FA 승인, 2026-10-25 08:1x UTC). 앞의 두 시도는 2FA 승인 세션이 만료돼 E404(`/-/v1/done`)로 끝났고 아무것도 게시되지 않았다(매번 registry에서 미게시 확인). registry 반영은 약 2분 늦었고 다시 게시하지 않고 기다렸다. shasum `c770c36a…`·integrity·fileCount 7,468·unpacked 114,312,642 B = RC, registry tarball sha256 `91a348e7…0e2f` = RC, `latest` = 0.3.4, `next` = 0.3.0-rc.6 그대로
+- [x] annotated tag `v0.3.4` → `76247bf`, GitHub Release "DUO 0.3.4"(draft 아님, prerelease 아님, GitHub latest release = v0.3.4, tarball 첨부, asset sha256 = RC)
+- [x] `release:verify-published` OK(problems 0, channel stable, dist-tags latest 0.3.4·next 0.3.0-rc.6, tag commit = H-93 target, 설치 파일 7,468·runtime tree 67). `node scripts/release/verify-published.mjs`로 실행(#90)
+- [x] registry 설치(`@duo-director/cli@latest`, 빈 prefix): `duoctl 0.3.4`, 번들 MCP SDK client·server·core 2.3.1, zod 4.6.7
 
 ## 0.3.3 (H-87, 2026-10-15 stable release, dist-tag `latest`, `v0.3.3` = `e4abe6a`)
 
