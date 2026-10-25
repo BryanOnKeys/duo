@@ -27,11 +27,21 @@ export function npm(args, options = {}) {
   return cli === undefined ? run("npm", args, { shell: process.platform === "win32", ...options }) : run(process.execPath, [cli, ...args], options);
 }
 
+/** JS entry points need Node; standalone binaries must be executed directly. */
+export function pnpmInvocation(exec, exists = fs.existsSync, platform = process.platform) {
+  if (exec !== undefined && /pnpm/iu.test(exec) && exists(exec)) {
+    if (/\.(?:js|cjs|mjs)$/iu.test(exec)) return { command: process.execPath, prefix: [exec], shell: false };
+    const shell = platform === "win32" && /\.(?:cmd|bat)$/iu.test(exec);
+    // cmd.exe needs a quoted shim path when npm_execpath contains spaces.
+    return { command: shell ? `"${exec}"` : exec, prefix: [], shell };
+  }
+  return { command: "pnpm", prefix: [], shell: platform === "win32" };
+}
+
 /** pnpm through the running package manager (pnpm run sets npm_execpath), else pnpm on PATH. */
 export function pnpm(args, options = {}) {
-  const exec = process.env.npm_execpath;
-  if (exec !== undefined && /pnpm/iu.test(exec) && fs.existsSync(exec)) return run(process.execPath, [exec, ...args], options);
-  return run("pnpm", args, { shell: process.platform === "win32", ...options });
+  const { command, prefix, shell } = pnpmInvocation(process.env.npm_execpath);
+  return run(command, [...prefix, ...args], { shell, ...options });
 }
 
 export function gitState() {
