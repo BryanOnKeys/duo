@@ -23,7 +23,7 @@ describe("release pnpm invocation", () => {
   it.each(["js", "cjs", "mjs", "CJS"])("selects Node for .%s on all supported platforms", (extension) => {
     const entry = "/tools with spaces/pnpm/bin/pnpm." + extension;
     for (const platform of ["win32", "linux", "darwin"] as const) {
-      expect(pnpmInvocation(entry, () => true, platform)).toEqual({ command: process.execPath, prefix: [entry], shell: false });
+      expect(pnpmInvocation(entry, () => true, platform, ["two words"])).toEqual({ command: process.execPath, args: [entry, "two words"], shell: false });
     }
   });
 
@@ -32,22 +32,36 @@ describe("release pnpm invocation", () => {
     ["linux", "/tools with spaces/pnpm"],
     ["darwin", "/tools with spaces/pnpm"],
   ] as const)("selects the standalone binary directly on %s", (platform, entry) => {
-    expect(pnpmInvocation(entry, () => true, platform)).toEqual({ command: entry, prefix: [], shell: false });
+    expect(pnpmInvocation(entry, () => true, platform, ["two words"])).toEqual({ command: entry, args: ["two words"], shell: false });
   });
 
-  it.each(["cmd", "bat"])("uses a shell only for Windows .%s shims", (extension) => {
+  it.each(["cmd", "bat"])("escapes Windows .%s shim arguments for both cmd parsing passes", (extension) => {
     const entry = "C:\\tools with spaces\\pnpm." + extension;
-    expect(pnpmInvocation(entry, () => true, "win32")).toEqual({ command: `"${entry}"`, prefix: [], shell: true });
+    const args = ["two words", "literal&echo DUO_ARG_INJECTION"];
+    const escapedCommand = "C:\\tools^ with^ spaces\\pnpm." + extension;
+    expect(pnpmInvocation(entry, () => true, "win32", args)).toEqual({
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/v:off", "/s", "/c", `"${escapedCommand} ^^^"two^^^ words^^^" ^^^"literal^^^&echo^^^ DUO_ARG_INJECTION^^^""`],
+      shell: false,
+      windowsVerbatimArguments: true,
+    });
+    expect(args).toEqual(["two words", "literal&echo DUO_ARG_INJECTION"]);
     for (const platform of ["linux", "darwin"] as const) {
-      expect(pnpmInvocation(entry, () => true, platform)).toEqual({ command: entry, prefix: [], shell: false });
+      expect(pnpmInvocation(entry, () => true, platform, args)).toEqual({ command: entry, args, shell: false });
     }
   });
 
+  it.each(["\r", "\n", "\0"])("rejects shim argument control character %j before spawning", (character) => {
+    expect(() => pnpmInvocation("C:\\tools\\pnpm.cmd", () => true, "win32", ["literal" + character + "echo DUO_ARG_INJECTION"]))
+      .toThrow("Windows pnpm shims cannot pass NUL or line breaks literally");
+  });
+
   it.each(["win32", "linux", "darwin"] as const)("preserves PATH fallback on %s", (platform) => {
-    const fallback = { command: "pnpm", prefix: [], shell: platform === "win32" };
-    expect(pnpmInvocation(undefined, () => true, platform)).toEqual(fallback);
-    expect(pnpmInvocation("/tools/npm-cli.js", () => true, platform)).toEqual(fallback);
-    expect(pnpmInvocation("/missing/pnpm.cjs", () => false, platform)).toEqual(fallback);
+    const args = ["build"];
+    const fallback = { command: "pnpm", args, shell: platform === "win32" };
+    expect(pnpmInvocation(undefined, () => true, platform, args)).toEqual(fallback);
+    expect(pnpmInvocation("/tools/npm-cli.js", () => true, platform, args)).toEqual(fallback);
+    expect(pnpmInvocation("/missing/pnpm.cjs", () => false, platform, args)).toEqual(fallback);
   });
 
   it.each(["js", "cjs", "mjs"])("runs a .%s entry point through Node", (extension) => {
@@ -87,14 +101,33 @@ describe("release pnpm invocation", () => {
     expect(JSON.parse(result.stdout)).toEqual(["build"]);
   });
 
-  it.skipIf(process.platform !== "win32").each(["cmd", "bat"])("executes a Windows .%s shim from a path with spaces", (extension) => {
+  it.skipIf(process.platform !== "win32").each(["cmd", "bat"])("preserves literal arguments through a Windows .%s shim", (extension) => {
     const { dir } = fixture();
     const shim = path.join(dir, "pnpm." + extension);
     fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" "%~dp0pnpm-probe.cjs" %*\r\n`);
     vi.stubEnv("npm_execpath", shim);
 
-    const result = pnpm(["build"]);
+    const args = ["build", "two words", "", 'embedded"quote', "backslash\\", 'slashes\\\\"quote',
+      "literal&echo DUO_ARG_INJECTION", "literal|echo DUO_PIPE_INJECTION", "caret^value", "(parentheses)",
+      "%DUO_ARG_VALUE%", "!DUO_ARG_VALUE!", "100%", "literal>DUO_ARG_REDIRECT", "literal<DUO_ARG_REDIRECT"];
+    const result = pnpm(args, { cwd: dir, env: { ...process.env, DUO_ARG_VALUE: "EXPANSION_IS_NOT_LITERAL" } });
     expect(result.code, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual(["build"]);
+    expect(JSON.parse(result.stdout)).toEqual(args);
+    expect(result.stderr).toBe("");
+    expect(fs.existsSync(path.join(dir, "DUO_ARG_REDIRECT"))).toBe(false);
+  });
+
+  it.skipIf(process.platform !== "win32").each(["cmd", "bat"])("preserves nonzero exit and stderr from a Windows .%s shim", (extension) => {
+    const { dir, probe } = fixture();
+    const shim = path.join(dir, "pnpm." + extension);
+    fs.writeFileSync(probe, 'console.log(JSON.stringify(process.argv.slice(2)));\nprocess.stderr.write("pnpm shim failure\\n");\nprocess.exitCode = 23;\n');
+    fs.writeFileSync(shim, `@echo off\r\n"${process.execPath}" "%~dp0pnpm-probe.cjs" %*\r\n`);
+    vi.stubEnv("npm_execpath", shim);
+
+    const args = ["two words", "literal&echo DUO_ARG_INJECTION"];
+    const result = pnpm(args, { cwd: dir });
+    expect(result.code).toBe(23);
+    expect(JSON.parse(result.stdout)).toEqual(args);
+    expect(result.stderr).toBe("pnpm shim failure\n");
   });
 });
