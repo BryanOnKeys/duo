@@ -116,7 +116,7 @@ duoctl doctor
 - `duoctl init`은 기존 Git 저장소를 도입합니다(첫 commit이 있어야 합니다). 저장소를 관찰하고, 추론할 수 없는 것만 묻고, `.duo-project/`에 최소한의 Project Truth를 만들고, 첫 index를 만든 뒤 adoption baseline을 기록합니다. commit하지 않은 변경이 있으면 `--baseline-policy head`나 `--baseline-policy abort` 중 하나를 고릅니다.
 - `duoctl install codex`나 `duoctl install claude-code`는 바꿀 파일을 먼저 보여 준 뒤 MCP 설정(`.codex/config.toml` 또는 `.mcp.json`)과 짧은 안내 블록(`AGENTS.md` 또는 `CLAUDE.md`)을 추가하고 DUO 서버가 실제로 뜨는지 확인합니다. commit은 직접 합니다. 남은 한 단계는 Agent 안에서 직접 해야 하며 DUO가 대신하지 않습니다.
   - Codex는 trust한 project에서만 `.codex/config.toml`을 읽습니다. Codex를 처음 열 때 나오는 trust 질문에서 이 폴더를 trust하거나, `~/.codex/config.toml`에 `[projects."/path/to/project"]`와 `trust_level = "trusted"`를 추가하세요. 그다음 Codex의 `/mcp`에 `duo-director`가 보입니다.
-  - Claude Code는 `.mcp.json`의 서버를 쓰기 전에 승인을 묻습니다. project에서 `claude`를 실행해 workspace trust 대화상자를 수락하고 `duo-director`를 승인하세요. 승인 전에는 `claude mcp get duo-director`가 `Pending approval`을 보이고, `claude mcp reset-project-choices`로 다시 물을 수 있습니다.
+  - Claude Code는 `.mcp.json`의 서버를 쓰기 전에 승인을 묻습니다. project에서 `claude`를 실행해 workspace trust 대화상자를 수락하고 `duo-director`를 승인하세요. 승인 전에는 `claude mcp get duo-director`가 `Pending approval`을 보이고, `claude mcp reset-project-choices`로 다시 물을 수 있습니다. 이 승인 질문은 대화형 세션에 적용되며, [Windows에서 Claude Code 2.1.308로 검증한 실행](docs/validation/claude-code-mcp-e2e.md#findings)에서는 headless `claude -p`가 `claude mcp get duo-director`에 `Pending approval`이 표시되는 동안에도 승인을 기다리지 않고 연결되었습니다.
 - `duoctl doctor`는 Git, Project Truth, index, 언어별 분석 수준, 연결한 Agent, 선택 LLM 설정을 확인하고 다음 할 일을 1~3개 보여 줍니다. 읽기만 합니다.
 - Agent 설정은 PATH에 있는 `duoctl`을 실행합니다. 예전 전역 설치가 남아 있다면 project 폴더의 일반 터미널에서 `duoctl --version`을 확인하세요. 버전이 달라도 install 검증은 아직 경고하지 않습니다([#40](https://github.com/kanghyunsoon/duo/issues/40)).
 
